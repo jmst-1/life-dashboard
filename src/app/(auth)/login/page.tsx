@@ -1,3 +1,16 @@
+import { Suspense } from 'react';
+import { LoginForm } from './login-form';
+
 export default function LoginPage() {
-  return null;
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
+          Loading…
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
+  );
 }
