@@ -1,0 +1,32 @@
+# Life Dashboard
+
+Stack: Next.js 14 App Router, TypeScript, Tailwind CSS, Supabase, Claude API, Vercel.
+
+Rules:
+- All DB access via Supabase client in server components or API routes. Never expose service key to client.
+- Claude API calls only from /api routes, after checkAndLogAiUsage() passes.
+  Use 'claude-sonnet-4-6'. Wrap in try/catch. Strip ```json fences before parsing.
+- Nutrition calorie/macro math is deterministic TypeScript (lib/nutrition.ts) — NEVER computed by LLM.
+  Claude's only nutrition job is the meal_prep_brief text.
+- Mobility and Morning Stretch use deterministic random-pick from movement_library (lib/movement.ts)
+  — NEVER a live Claude call at pick time. AI is used once, offline, to author library content.
+- Both random_pick categories (Mobility, Morning Stretch) filter by library_type ('mobility'|'stretch')
+  using the same pickWeeklyRoutines() function — never duplicate the selection logic.
+- sessions.routine_steps is a snapshot of the library entry's steps at pick time, not a live join.
+  Populate it at generation time; do not re-join movement_library at render time.
+- sessions.exercise_log is written only at log time for Strength sessions. It is never pre-populated.
+- Category coach prompts live in lib/category-registry.ts (one entry per curated type plus a generic
+  fallback). Never inline a new bespoke prompt file without adding its registry entry. Never
+  special-case a category by name outside the registry.
+- Coach prompts must instruct the model to return JSON only, no preamble, no markdown.
+- Score computation runs server-side only, per category, fully deterministic.
+  Commentary is ONE combined Claude call per week, not one per category.
+- Date handling: week starts Monday. Store dates as ISO strings. Use date-fns for date math.
+- Every table has RLS by auth.uid() = user_id, except: invites (admin-only via is_admin),
+  ai_usage_log (select-only own rows; inserts server-side), movement_library (global entries
+  where user_id is null are readable by all authenticated users).
+- The only RLS-bypassing code path is the security-definer signup trigger. Never add another.
+- Signup requires a valid invite code, enforced in the trigger itself, not just client-side.
+- middleware.ts enforces: no session → /login; incomplete profile → /onboarding.
+- Keep coach system prompts in /lib/prompts/[category-type].ts, not inline in API routes.
+
