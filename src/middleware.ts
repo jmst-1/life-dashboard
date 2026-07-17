@@ -28,7 +28,12 @@ export async function middleware(request: NextRequest) {
     profile?.height_cm != null &&
     profile?.age != null;
 
-  if (!isComplete && pathname !== '/onboarding') {
+  // Allow API routes during onboarding (profile + categories PATCH/POST).
+  if (
+    !isComplete &&
+    pathname !== '/onboarding' &&
+    !pathname.startsWith('/api/')
+  ) {
     const onboardingUrl = request.nextUrl.clone();
     onboardingUrl.pathname = '/onboarding';
     onboardingUrl.search = '';

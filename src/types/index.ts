@@ -28,6 +28,32 @@ export type Profile = {
   updated_at: string;
 };
 
+export type WeightLog = {
+  id: string;
+  user_id: string;
+  weight_kg: number;
+  logged_date: string;
+  notes: string | null;
+  created_at: string;
+};
+
+/** Cycling coach_context keys: ftp, phase, goals, equipment_notes, injury_notes */
+export type CyclingCoachContext = {
+  ftp?: number;
+  phase?: TrainingPhase;
+  goals?: string;
+  equipment_notes?: string;
+  injury_notes?: string;
+};
+
+/** Strength coach_context keys: level, equipment, goals, injury_notes */
+export type StrengthCoachContext = {
+  level?: 'beginner' | 'intermediate' | 'advanced';
+  equipment?: string;
+  goals?: string;
+  injury_notes?: string;
+};
+
 export type Category = {
   id: string;
   user_id: string;

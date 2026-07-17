@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { WeightLogForm } from '@/components/settings/weight-log-form';
-import { getWeightLogs } from '@/lib/db';
+import { ProfileForm } from '@/components/settings/profile-form';
+import { getProfile } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
 
-export default async function WeightSettingsPage() {
+export default async function ProfileSettingsPage() {
   const supabase = createClient();
   const {
     data: { user },
@@ -14,7 +14,10 @@ export default async function WeightSettingsPage() {
     redirect('/login');
   }
 
-  const logs = await getWeightLogs(supabase, user.id);
+  const profile = await getProfile(supabase, user.id);
+  if (!profile) {
+    redirect('/onboarding');
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 px-4 py-8 pb-24 text-white">
@@ -25,12 +28,12 @@ export default async function WeightSettingsPage() {
         >
           ← Settings
         </Link>
-        <h1 className="mt-4 text-xl font-semibold">Weight Log</h1>
+        <h1 className="mt-4 text-xl font-semibold">Profile</h1>
         <p className="mt-1 text-sm text-gray-400">
-          Log weigh-ins. Your profile current weight updates automatically.
+          Body metrics, deficit preferences, and dietary notes.
         </p>
         <div className="mt-8">
-          <WeightLogForm logs={logs} />
+          <ProfileForm profile={profile} />
         </div>
       </div>
     </div>

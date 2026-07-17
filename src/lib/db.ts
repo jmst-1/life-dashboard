@@ -1,6 +1,6 @@
 import { format, startOfWeek } from 'date-fns';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Category, Profile, Session, Week } from '@/types';
+import type { Category, Profile, Session, Week, WeightLog } from '@/types';
 
 export async function getProfile(
   supabase: SupabaseClient,
@@ -18,6 +18,92 @@ export async function getProfile(
   }
 
   return data as Profile | null;
+}
+
+export type UpdateProfileInput = {
+  display_name?: string | null;
+  current_weight_kg?: number | null;
+  goal_weight_kg?: number | null;
+  height_cm?: number | null;
+  age?: number | null;
+  biological_sex?: 'male' | 'female' | null;
+  activity_level?: 'sedentary' | 'moderate' | 'active';
+  target_rate_kg_per_week?: number;
+  deficit_strategy?: 'cycling' | 'uniform';
+  tdee_override?: number | null;
+  dietary_notes?: string | null;
+};
+
+export async function updateProfile(
+  supabase: SupabaseClient,
+  userId: string,
+  input: UpdateProfileInput
+): Promise<{ profile: Profile | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({
+      ...input,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('updateProfile error:', error);
+    return { profile: null, error: error.message };
+  }
+
+  return { profile: data as Profile, error: null };
+}
+
+export async function getWeightLogs(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<WeightLog[]> {
+  const { data, error } = await supabase
+    .from('weight_logs')
+    .select('*')
+    .eq('user_id', userId)
+    .order('logged_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getWeightLogs error:', error);
+    return [];
+  }
+
+  return (data ?? []) as WeightLog[];
+}
+
+export type CreateWeightLogInput = {
+  weight_kg: number;
+  logged_date: string;
+  notes?: string | null;
+};
+
+export async function createWeightLog(
+  supabase: SupabaseClient,
+  userId: string,
+  input: CreateWeightLogInput
+): Promise<{ weightLog: WeightLog | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('weight_logs')
+    .insert({
+      user_id: userId,
+      weight_kg: input.weight_kg,
+      logged_date: input.logged_date,
+      notes: input.notes ?? null,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('createWeightLog error:', error);
+    return { weightLog: null, error: error.message };
+  }
+
+  return { weightLog: data as WeightLog, error: null };
 }
 
 export async function getWeek(
@@ -152,6 +238,9 @@ export type UpdateCategoryInput = {
   nutrition_met?: number;
   nutrition_hard_threshold_min?: number;
   coach_context?: Record<string, unknown>;
+  goal_event_name?: string | null;
+  goal_event_date?: string | null;
+  goal_event_notes?: string | null;
 };
 
 export async function updateCategory(

@@ -1,3 +1,7 @@
+import { redirect } from 'next/navigation';
+import { OnboardingFlow } from '@/components/onboarding/onboarding-flow';
+import { getProfile } from '@/lib/db';
+import { PRODUCT_CONFIG, PRODUCT_MODE } from '@/lib/product-config';
 import { createClient } from '@/lib/supabase/server';
 
 export default async function OnboardingPage() {
@@ -6,18 +10,19 @@ export default async function OnboardingPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect('/login');
+  }
+
+  const profile = await getProfile(supabase, user.id);
+  const allowCustomCategories =
+    PRODUCT_CONFIG[PRODUCT_MODE].allowCustomCategories;
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
-      <div className="w-full max-w-sm text-center">
-        <h1 className="text-xl font-semibold">
-          Onboarding coming in Session 5
-        </h1>
-        {user?.email && (
-          <p className="mt-3 text-sm text-gray-400">
-            Signed in as <span className="text-white">{user.email}</span>
-          </p>
-        )}
-      </div>
-    </div>
+    <OnboardingFlow
+      displayName={profile?.display_name ?? null}
+      allowCustomCategories={allowCustomCategories}
+      initialProfile={profile}
+    />
   );
 }

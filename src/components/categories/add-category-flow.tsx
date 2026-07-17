@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { Category } from '@/types';
 import {
   CATEGORY_TEMPLATES,
   CUSTOM_CATEGORY_DEFAULTS,
@@ -15,6 +16,8 @@ type AddCategoryFlowProps = {
   allowCustomCategories: boolean;
   open: boolean;
   onClose: () => void;
+  /** When set, called instead of router.refresh after a successful create */
+  onCategoryAdded?: (category: Category) => void;
 };
 
 type FlowStep = 'pick' | 'form';
@@ -23,6 +26,7 @@ export function AddCategoryFlow({
   allowCustomCategories,
   open,
   onClose,
+  onCategoryAdded,
 }: AddCategoryFlowProps) {
   const router = useRouter();
   const [step, setStep] = useState<FlowStep>('pick');
@@ -52,9 +56,13 @@ export function AddCategoryFlow({
     setStep('form');
   }
 
-  function handleSuccess() {
+  function handleSuccess(category: Category) {
     handleClose();
-    router.refresh();
+    if (onCategoryAdded) {
+      onCategoryAdded(category);
+    } else {
+      router.refresh();
+    }
   }
 
   const selectedTemplate = CATEGORY_TEMPLATES.find((t) => t.id === templateId);

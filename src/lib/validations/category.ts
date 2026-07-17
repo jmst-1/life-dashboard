@@ -30,6 +30,8 @@ export const createCategorySchema = z.object({
   coach_context: coachContextSchema,
 });
 
+const nullableString = z.string().trim().nullable().optional();
+
 export const updateCategorySchema = z.object({
   name: z.string().trim().min(1, 'Name is required').optional(),
   icon: z.string().trim().min(1, 'Icon is required').optional(),
@@ -46,6 +48,13 @@ export const updateCategorySchema = z.object({
     .positive('Hard session threshold must be a positive number')
     .optional(),
   coach_context: coachContextSchema,
+  goal_event_name: nullableString,
+  goal_event_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+    .nullable()
+    .optional(),
+  goal_event_notes: nullableString,
 });
 
 export type CreateCategoryBody = z.infer<typeof createCategorySchema>;
