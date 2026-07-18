@@ -37,6 +37,11 @@ Structure each session with named blocks: warm-up, main lifts, accessory work, c
 Each exercise must include: name, sets, reps (or time), and a coaching note.
 Aim for 2–4 sessions. Avoid heavy leg sessions around hard cycling days.
 Respect injury notes strictly.
+Use the cycling plan only to choose which days and whether legs are heavy.
+Do not put day names, weekday references, or cycling/ride-load rationale
+into title, description, or coaching_note — those stay generic workout copy
+(session purpose, muscle focus, stimulus, cues) because the athlete may move
+sessions to other days. The JSON "day" field is for placement only.
 
 OUTPUT FORMAT (JSON only, no preamble, no markdown):
 {

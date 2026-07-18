@@ -14,6 +14,32 @@ type StrengthSessionFormProps = {
   canEdit: boolean;
 };
 
+function parseDefaultReps(reps: string): number | null {
+  const match = reps.match(/\d+/);
+  if (!match) return null;
+  const n = Number(match[0]);
+  return Number.isNaN(n) ? null : n;
+}
+
+function minutesToTimeValue(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+}
+
+const DURATION_PATTERN = /^(\d{1,2}):([0-5]\d):([0-5]\d)$/;
+
+function timeValueToMinutes(value: string): number | null {
+  const match = value.trim().match(DURATION_PATTERN);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+  return Math.round(totalSeconds / 60);
+}
+
 function buildInitialLog(session: Session): ExerciseLogEntry[] {
   const blocks = session.blocks ?? [];
   const existing = session.exercise_log ?? [];
@@ -31,13 +57,21 @@ function buildInitialLog(session: Session): ExerciseLogEntry[] {
         const priorSet = prior?.sets.find((s) => s.set_num === i);
         sets.push({
           set_num: i,
-          reps: priorSet?.reps ?? null,
+          reps: priorSet?.reps ?? parseDefaultReps(exercise.reps),
           weight_kg: priorSet?.weight_kg ?? null,
-          equipment: priorSet?.equipment ?? null,
-          notes: priorSet?.notes ?? null,
+          equipment: null,
+          notes: null,
         });
       }
-      entries.push({ exercise_name: exercise.name, sets });
+      const priorNotes =
+        prior?.notes ??
+        prior?.sets.find((s) => s.notes?.trim())?.notes ??
+        null;
+      entries.push({
+        exercise_name: exercise.name,
+        notes: priorNotes,
+        sets,
+      });
     }
   }
   return entries;
@@ -58,8 +92,8 @@ export function StrengthSessionForm({
   const [log, setLog] = useState<ExerciseLogEntry[]>(() =>
     buildInitialLog(session)
   );
-  const [duration, setDuration] = useState(
-    String(session.planned_duration_min ?? 0)
+  const [duration, setDuration] = useState(() =>
+    minutesToTimeValue(session.planned_duration_min ?? 0)
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +101,7 @@ export function StrengthSessionForm({
   function updateSet(
     exerciseName: string,
     setNum: number,
-    field: keyof Omit<ExerciseLogSet, 'set_num'>,
+    field: 'reps' | 'weight_kg',
     value: string
   ) {
     setLog((prev) =>
@@ -77,12 +111,18 @@ export function StrengthSessionForm({
           ...entry,
           sets: entry.sets.map((s) => {
             if (s.set_num !== setNum) return s;
-            if (field === 'equipment' || field === 'notes') {
-              return { ...s, [field]: value.trim() || null };
-            }
             return { ...s, [field]: numOrNull(value) };
           }),
         };
+      })
+    );
+  }
+
+  function updateExerciseNotes(exerciseName: string, value: string) {
+    setLog((prev) =>
+      prev.map((entry) => {
+        if (entry.exercise_name !== exerciseName) return entry;
+        return { ...entry, notes: value.trim() || null };
       })
     );
   }
@@ -97,9 +137,9 @@ export function StrengthSessionForm({
     setSaving(true);
     setError(null);
 
-    const durationNum = Number(duration);
-    if (Number.isNaN(durationNum) || durationNum < 0) {
-      setError('Duration must be a non-negative number');
+    const durationNum = timeValueToMinutes(duration);
+    if (durationNum == null || durationNum < 0) {
+      setError('Duration must be a valid time (HH:MM:SS)');
       setSaving(false);
       return;
     }
@@ -109,7 +149,7 @@ export function StrengthSessionForm({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          actual_duration_min: Math.round(durationNum),
+          actual_duration_min: durationNum,
           completed: true,
           skipped: false,
           exercise_log: log,
@@ -176,9 +216,9 @@ export function StrengthSessionForm({
                     {(entry?.sets ?? []).map((set) => (
                       <li
                         key={set.set_num}
-                        className="grid grid-cols-2 gap-2 sm:grid-cols-5"
+                        className="grid grid-cols-3 gap-2"
                       >
-                        <span className="col-span-2 text-xs font-medium text-gray-400 sm:col-span-1 sm:self-center">
+                        <span className="text-xs font-medium text-gray-400 self-center">
                           Set {set.set_num}
                         </span>
                         <input
@@ -200,22 +240,6 @@ export function StrengthSessionForm({
                           aria-label={`Set ${set.set_num} weight`}
                         />
                         <input
-                          type="text"
-                          placeholder="Equip"
-                          disabled={!canEdit}
-                          value={set.equipment ?? ''}
-                          onChange={(e) =>
-                            updateSet(
-                              exercise.name,
-                              set.set_num,
-                              'equipment',
-                              e.target.value
-                            )
-                          }
-                          className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white disabled:opacity-60"
-                          aria-label={`Set ${set.set_num} equipment`}
-                        />
-                        <input
                           type="number"
                           min={0}
                           step={1}
@@ -233,25 +257,20 @@ export function StrengthSessionForm({
                           className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white disabled:opacity-60"
                           aria-label={`Set ${set.set_num} reps`}
                         />
-                        <input
-                          type="text"
-                          placeholder="Notes"
-                          disabled={!canEdit}
-                          value={set.notes ?? ''}
-                          onChange={(e) =>
-                            updateSet(
-                              exercise.name,
-                              set.set_num,
-                              'notes',
-                              e.target.value
-                            )
-                          }
-                          className="col-span-2 rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white disabled:opacity-60 sm:col-span-5"
-                          aria-label={`Set ${set.set_num} notes`}
-                        />
                       </li>
                     ))}
                   </ul>
+                  <input
+                    type="text"
+                    placeholder="Notes"
+                    disabled={!canEdit}
+                    value={entry?.notes ?? ''}
+                    onChange={(e) =>
+                      updateExerciseNotes(exercise.name, e.target.value)
+                    }
+                    className="mt-2 w-full rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white disabled:opacity-60"
+                    aria-label={`${exercise.name} notes`}
+                  />
                 </li>
               );
             })}
@@ -263,15 +282,16 @@ export function StrengthSessionForm({
         <div className="space-y-3 border-t border-gray-800 pt-4">
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-gray-400">
-              Actual duration (min)
+              Actual duration (HH:MM:SS)
             </span>
             <input
-              type="number"
-              min={0}
-              step={1}
+              type="text"
+              inputMode="numeric"
+              placeholder="00:50:00"
+              pattern="\d{1,2}:[0-5]\d:[0-5]\d"
               value={duration}
               onChange={(e) => setDuration(e.target.value)}
-              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 font-mono text-sm text-white tabular-nums"
               required
             />
           </label>

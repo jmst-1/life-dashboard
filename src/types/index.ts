@@ -8,7 +8,7 @@ export type StrengthExercise = { name: string; sets: number; reps: string; notes
 export type StrengthBlock = { name: string; duration_min: number; exercises: StrengthExercise[] };
 export type RoutineStep = { order: number; name: string; duration_sec: number; cue: string };
 export type ExerciseLogSet = { set_num: number; reps: number | null; weight_kg: number | null; equipment: string | null; notes: string | null };
-export type ExerciseLogEntry = { exercise_name: string; sets: ExerciseLogSet[] };
+export type ExerciseLogEntry = { exercise_name: string; notes: string | null; sets: ExerciseLogSet[] };
 
 export type Profile = {
   id: string;

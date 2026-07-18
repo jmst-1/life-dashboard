@@ -70,6 +70,7 @@ const exerciseLogSetSchema = z.object({
 
 const exerciseLogEntrySchema = z.object({
   exercise_name: z.string().min(1),
+  notes: z.string().nullable(),
   sets: z.array(exerciseLogSetSchema),
 });
 
