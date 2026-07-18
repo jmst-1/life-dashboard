@@ -1,6 +1,18 @@
 import { format, startOfWeek } from 'date-fns';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Category, Profile, Session, Week, WeightLog } from '@/types';
+import { plannedDateForDay } from '@/lib/plan-context';
+import type {
+  Category,
+  CyclingZone,
+  Profile,
+  Session,
+  SessionRenderer,
+  StrengthBlock,
+  Week,
+  WeekReview,
+  WeightLog,
+} from '@/types';
+import type { PlanResponse } from '@/lib/validations/plan';
 
 export async function getProfile(
   supabase: SupabaseClient,
@@ -312,4 +324,226 @@ export async function getSessions(
   }
 
   return (data ?? []) as Session[];
+}
+
+export async function getWeekById(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string
+): Promise<Week | null> {
+  const { data, error } = await supabase
+    .from('weeks')
+    .select('*')
+    .eq('id', weekId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('getWeekById error:', error);
+    return null;
+  }
+
+  return data as Week | null;
+}
+
+export async function getWeekReviewsForCategory(
+  supabase: SupabaseClient,
+  userId: string,
+  categoryId: string,
+  beforeWeekStart: string,
+  limit = 4
+): Promise<{ reviews: WeekReview[]; weeksById: Record<string, Week> }> {
+  const { data: weeks, error: weeksError } = await supabase
+    .from('weeks')
+    .select('*')
+    .eq('user_id', userId)
+    .lt('week_start', beforeWeekStart)
+    .order('week_start', { ascending: false })
+    .limit(12);
+
+  if (weeksError) {
+    console.error('getWeekReviewsForCategory weeks error:', weeksError);
+    return { reviews: [], weeksById: {} };
+  }
+
+  const pastWeeks = (weeks ?? []) as Week[];
+  if (pastWeeks.length === 0) {
+    return { reviews: [], weeksById: {} };
+  }
+
+  const weekIds = pastWeeks.map((w) => w.id);
+  const weeksById = Object.fromEntries(pastWeeks.map((w) => [w.id, w]));
+
+  const { data: reviews, error: reviewsError } = await supabase
+    .from('week_reviews')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('category_id', categoryId)
+    .in('week_id', weekIds);
+
+  if (reviewsError) {
+    console.error('getWeekReviewsForCategory reviews error:', reviewsError);
+    return { reviews: [], weeksById };
+  }
+
+  const ordered = ((reviews ?? []) as WeekReview[])
+    .sort((a, b) => {
+      const aStart = weeksById[a.week_id]?.week_start ?? '';
+      const bStart = weeksById[b.week_id]?.week_start ?? '';
+      return bStart.localeCompare(aStart);
+    })
+    .slice(0, limit);
+
+  return { reviews: ordered, weeksById };
+}
+
+export async function getSessionsByWeekAndCategory(
+  supabase: SupabaseClient,
+  weekId: string,
+  categoryId: string
+): Promise<Session[]> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('week_id', weekId)
+    .eq('category_id', categoryId)
+    .order('day_of_week')
+    .order('sort_order');
+
+  if (error) {
+    console.error('getSessionsByWeekAndCategory error:', error);
+    return [];
+  }
+
+  return (data ?? []) as Session[];
+}
+
+export async function deleteSessionsForWeekCategory(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string,
+  categoryId: string
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('sessions')
+    .delete()
+    .eq('user_id', userId)
+    .eq('week_id', weekId)
+    .eq('category_id', categoryId);
+
+  if (error) {
+    console.error('deleteSessionsForWeekCategory error:', error);
+    return { error: error.message };
+  }
+
+  return { error: null };
+}
+
+type GeneratedSessionInput = {
+  day: number;
+  title: string;
+  duration_min: number;
+  description?: string;
+  coaching_note?: string;
+  zones?: CyclingZone[];
+  blocks?: StrengthBlock[];
+};
+
+export async function insertGeneratedSessions(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string,
+  categoryId: string,
+  weekStart: string,
+  parsed: PlanResponse,
+  renderer: SessionRenderer
+): Promise<{ sessions: Session[]; error: string | null }> {
+  const rows = parsed.sessions.map((session: GeneratedSessionInput, index) => {
+    const descriptionParts = [
+      session.description?.trim(),
+      session.coaching_note?.trim(),
+    ].filter(Boolean);
+
+    const row: Record<string, unknown> = {
+      week_id: weekId,
+      user_id: userId,
+      category_id: categoryId,
+      day_of_week: session.day,
+      planned_date: plannedDateForDay(weekStart, session.day),
+      title: session.title,
+      description: descriptionParts.length
+        ? descriptionParts.join('\n\n')
+        : null,
+      planned_duration_min: session.duration_min,
+      session_type: 'ai_generated',
+      sort_order: index,
+      zones: null,
+      blocks: null,
+      routine_steps: null,
+      exercise_log: null,
+    };
+
+    if (renderer === 'cycling' && 'zones' in session) {
+      row.zones = session.zones ?? [];
+    }
+    if (renderer === 'strength' && 'blocks' in session) {
+      row.blocks = session.blocks ?? [];
+    }
+
+    return row;
+  });
+
+  if (rows.length === 0) {
+    return { sessions: [], error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert(rows)
+    .select('*');
+
+  if (error) {
+    console.error('insertGeneratedSessions error:', error);
+    return { sessions: [], error: error.message };
+  }
+
+  const sessions = ((data ?? []) as Session[]).sort((a, b) => {
+    if (a.day_of_week !== b.day_of_week) {
+      return a.day_of_week - b.day_of_week;
+    }
+    return a.sort_order - b.sort_order;
+  });
+
+  return { sessions, error: null };
+}
+
+export type UpdateSessionInput = {
+  title?: string;
+  planned_duration_min?: number | null;
+};
+
+export async function updateSession(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string,
+  fields: UpdateSessionInput
+): Promise<{ session: Session | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .update(fields)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    console.error('updateSession error:', error);
+    return { session: null, error: error.message };
+  }
+
+  if (!data) {
+    return { session: null, error: 'Session not found' };
+  }
+
+  return { session: data as Session, error: null };
 }

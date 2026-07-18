@@ -4,6 +4,7 @@ import { FormEvent, useState } from 'react';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { CategoryGlyph } from '@/components/categories/category-glyph';
+import { PlanGenerationStep } from '@/components/plan/plan-generation-step';
 import type { Category, Week } from '@/types';
 
 const inputClassName =
@@ -275,23 +276,12 @@ export function PlanningWizard({
   );
 
   const step3 = (
-    <section className="space-y-4">
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-          Step 3 — Generate Plans
-        </p>
-        <h2 className="mt-1 text-lg font-semibold text-white">
-          Generating plans…
-        </h2>
-        <p className="mt-2 text-sm text-gray-400">
-          Plan generation comes next. Your notes are saved
-          {Object.values(selectedCategoryIds).some((v) => v === false)
-            ? ' and category scope is ready'
-            : ''}
-          .
-        </p>
-      </div>
-    </section>
+    <PlanGenerationStep
+      weekId={week.id}
+      planningNotes={planningNotes}
+      categories={categories}
+      selectedCategoryIds={selectedCategoryIds}
+    />
   );
 
   return (
