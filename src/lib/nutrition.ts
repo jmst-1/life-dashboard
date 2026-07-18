@@ -13,7 +13,7 @@ export function bmr(
   sex: 'male' | 'female'
 ): number {
   const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
-  return sex === 'male' ? base + 5 : base - 161;
+  return Math.round(sex === 'male' ? base + 5 : base - 161);
 }
 
 const ACTIVITY_MULTIPLIER = {
@@ -93,7 +93,7 @@ export function classifyDayType(daySessions: DaySessions): DayType {
 }
 
 export function weeklyDeficitTarget(profile: Profile): number {
-  return profile.target_rate_kg_per_week * 7700;
+  return Math.round(profile.target_rate_kg_per_week * 7700);
 }
 
 export function isRaceWeek(
@@ -128,7 +128,7 @@ export function buildCalorieTargets(
   const weeklyDeficit = weeklyDeficitTarget(profile);
 
   if (profile.deficit_strategy === 'uniform') {
-    const dailyDeficit = weeklyDeficit / 7;
+    const dailyDeficit = Math.round(weeklyDeficit / 7);
     return Object.fromEntries(
       [0, 1, 2, 3, 4, 5, 6].map((d) => [
         d,
@@ -141,7 +141,9 @@ export function buildCalorieTargets(
     .filter(([, t]) => t === 'hard')
     .map(([d]) => Number(d));
   const otherDays = [0, 1, 2, 3, 4, 5, 6].filter((d) => !hardDays.includes(d));
-  const perDayDeficit = otherDays.length ? weeklyDeficit / otherDays.length : 0;
+  const perDayDeficit = otherDays.length
+    ? Math.round(weeklyDeficit / otherDays.length)
+    : 0;
   const targets: Record<number, number> = {};
   for (const d of [0, 1, 2, 3, 4, 5, 6]) {
     targets[d] = hardDays.includes(d)
@@ -165,6 +167,30 @@ export type MacroGuide = {
   day_map: Record<number, DayType>;
 };
 
+/** Rest-day target with zero training — used when the week has no rest days. */
+function restDayCalories(
+  profile: Profile,
+  dayMap: Record<number, DayType>,
+  raceWeek: boolean
+): number {
+  const baseline = baselineTDEE(profile);
+  if (raceWeek) return baseline;
+
+  const weeklyDeficit = weeklyDeficitTarget(profile);
+  if (profile.deficit_strategy === 'uniform') {
+    return Math.round(baseline - Math.round(weeklyDeficit / 7));
+  }
+
+  const hardDays = Object.entries(dayMap)
+    .filter(([, t]) => t === 'hard')
+    .map(([d]) => Number(d));
+  const otherDays = [0, 1, 2, 3, 4, 5, 6].filter((d) => !hardDays.includes(d));
+  const perDayDeficit = otherDays.length
+    ? Math.round(weeklyDeficit / otherDays.length)
+    : 0;
+  return Math.round(baseline - perDayDeficit);
+}
+
 export function buildMacroGuide(
   profile: Profile,
   dayMap: Record<number, DayType>,
@@ -175,18 +201,25 @@ export function buildMacroGuide(
   const fatG = Math.round(0.7 * profile.current_weight_kg!);
   const proteinCal = proteinG * 4;
   const fatCal = fatG * 9;
+  const minCal = proteinCal + fatCal;
 
   const byType = {} as MacroGuide['day_types'];
   for (const type of ['hard', 'moderate', 'rest'] as DayType[]) {
     const days = Object.entries(dayMap)
       .filter(([, t]) => t === type)
       .map(([d]) => Number(d));
-    const avgCal = days.length
-      ? Math.round(days.reduce((s, d) => s + calorieTargets[d], 0) / days.length)
-      : 0;
-    const carbsG = Math.max(Math.round((avgCal - proteinCal - fatCal) / 4), 0);
+    let avgCal = 0;
+    if (days.length) {
+      avgCal = Math.round(
+        days.reduce((s, d) => s + calorieTargets[d], 0) / days.length
+      );
+    } else if (type === 'rest') {
+      avgCal = restDayCalories(profile, dayMap, raceWeek);
+    }
+    const carbsG = Math.max(Math.round((avgCal - minCal) / 4), 0);
+    const calories = proteinCal + carbsG * 4 + fatCal;
     byType[type] = {
-      calories: avgCal,
+      calories,
       protein_g: proteinG,
       carbs_g: carbsG,
       fat_g: fatG,
