@@ -9,6 +9,19 @@ export const generatePlanBodySchema = z.object({
 
 export type GeneratePlanBody = z.infer<typeof generatePlanBodySchema>;
 
+export const generateMovementBodySchema = z.object({
+  weekId: z.string().uuid(),
+  categoryId: z.string().uuid(),
+});
+
+export type GenerateMovementBody = z.infer<typeof generateMovementBodySchema>;
+
+export const rerollMovementBodySchema = z.object({
+  sessionId: z.string().uuid(),
+});
+
+export type RerollMovementBody = z.infer<typeof rerollMovementBodySchema>;
+
 const cyclingZoneSchema = z.object({
   name: z.string(),
   duration_min: z.number(),

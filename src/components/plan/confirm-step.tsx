@@ -161,8 +161,6 @@ export function ConfirmStep({
             </li>
             {selected.map((category) => {
               const sessions = sessionsByCategory[category.id] ?? [];
-              const isPendingRandom =
-                category.tracking_type === 'random_pick' && sessions.length === 0;
               const minutes = plannedMinutes(sessions);
 
               return (
@@ -181,15 +179,9 @@ export function ConfirmStep({
                       {category.name}
                     </span>
                   </div>
-                  {isPendingRandom ? (
-                    <span className="shrink-0 text-right text-xs text-gray-500">
-                      Will be generated after you confirm
-                    </span>
-                  ) : (
-                    <span className="shrink-0 tabular-nums text-gray-300">
-                      {minutes} min
-                    </span>
-                  )}
+                  <span className="shrink-0 tabular-nums text-gray-300">
+                    {minutes} min
+                  </span>
                 </li>
               );
             })}

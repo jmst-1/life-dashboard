@@ -1,20 +1,51 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Shuffle } from 'lucide-react';
 import { CategoryGlyph } from '@/components/categories/category-glyph';
 import {
   WeekPlanCalendar,
   type CalendarSession,
 } from '@/components/plan/week-plan-calendar';
-import { plannedDateForDay } from '@/lib/plan-context';
+import { dayLabel, plannedDateForDay } from '@/lib/plan-context';
+import { createClient } from '@/lib/supabase/client';
 import type { Category, Session } from '@/types';
 
 /** Survives React Strict Mode remounts so auto-gen only fires once per week. */
 const autoStartedWeeks = new Set<string>();
+/** Movement bootstrap keys already started (weekId:categoryIds). */
+const movementBootstrappedKeys = new Set<string>();
 /** Prevents duplicate in-flight generate calls for the same category. */
 const inFlightCategoryIds = new Set<string>();
+type HydrateResult = { status: 'done' | 'idle'; sessions: Session[] };
+
 /** In-flight hydrate promises so concurrent callers share one fetch. */
-const hydratePromises = new Map<string, Promise<'done' | 'idle'>>();
+const hydratePromises = new Map<string, Promise<HydrateResult>>();
+/** In-flight reroll for a session id. */
+const inFlightRerollIds = new Set<string>();
+
+type MovementSession = Session & { target_area?: string | null };
+
+function formatTargetArea(area: string | null | undefined): string {
+  if (!area) return '—';
+  return area.replace(/_/g, ' ');
+}
+
+async function loadTargetAreaMap(
+  entryIds: string[]
+): Promise<Record<string, string>> {
+  const unique = Array.from(new Set(entryIds.filter(Boolean)));
+  if (unique.length === 0) return {};
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('movement_library')
+    .select('id, target_area')
+    .in('id', unique);
+  if (error || !data) return {};
+  return Object.fromEntries(
+    data.map((row) => [row.id as string, row.target_area as string])
+  );
+}
 
 type CategoryGenStatus =
   | 'idle'
@@ -123,7 +154,18 @@ export function PlanGenerationStep({
 
   const [genState, setGenState] = useState<Record<string, CategoryGenState>>(
     () =>
-      Object.fromEntries(aiPlanCategories.map((c) => [c.id, emptyState()]))
+      Object.fromEntries(
+        [...aiPlanCategories, ...randomPickCategories].map((c) => [
+          c.id,
+          emptyState(),
+        ])
+      )
+  );
+  const [targetAreaByEntryId, setTargetAreaByEntryId] = useState<
+    Record<string, string>
+  >({});
+  const [rerollingSessionId, setRerollingSessionId] = useState<string | null>(
+    null
   );
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -143,6 +185,24 @@ export function PlanGenerationStep({
   const activeCategoryIds = selected.map((c) => c.id);
   const activeCategoryIdsKey = activeCategoryIds.join(',');
   const aiPlanCategoryIdsKey = aiPlanCategories.map((c) => c.id).join(',');
+  const randomPickCategoryIdsKey = randomPickCategories
+    .map((c) => c.id)
+    .join(',');
+
+  function mergeTargetAreas(
+    sessions: MovementSession[],
+    areas?: Record<string, string>
+  ) {
+    const next: Record<string, string> = { ...areas };
+    for (const session of sessions) {
+      if (session.library_entry_id && session.target_area) {
+        next[session.library_entry_id] = session.target_area;
+      }
+    }
+    if (Object.keys(next).length > 0) {
+      setTargetAreaByEntryId((prev) => ({ ...prev, ...next }));
+    }
+  }
 
   const generateCategory = useCallback(
     async (category: Category) => {
@@ -216,17 +276,130 @@ export function PlanGenerationStep({
     [weekId, planningNotes, activeCategoryIdsKey]
   );
 
+  const generateMovementCategory = useCallback(
+    async (category: Category) => {
+      if (inFlightCategoryIds.has(category.id)) {
+        return false;
+      }
+      inFlightCategoryIds.add(category.id);
+
+      setGenState((prev) => ({
+        ...prev,
+        [category.id]: {
+          ...(prev[category.id] ?? emptyState()),
+          status: 'generating',
+          error: null,
+        },
+      }));
+
+      try {
+        const res = await fetch('/api/plan/generate-movement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            weekId,
+            categoryId: category.id,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setGenState((prev) => ({
+            ...prev,
+            [category.id]: {
+              ...(prev[category.id] ?? emptyState()),
+              status: 'error',
+              error: data.error ?? 'Failed to generate movement plan',
+            },
+          }));
+          return false;
+        }
+
+        const sessions = (data.sessions ?? []) as MovementSession[];
+        mergeTargetAreas(sessions);
+        setGenState((prev) => ({
+          ...prev,
+          [category.id]: {
+            status: 'done',
+            weekTheme: null,
+            weekNote: null,
+            sessions,
+            error: null,
+          },
+        }));
+        return true;
+      } catch {
+        setGenState((prev) => ({
+          ...prev,
+          [category.id]: {
+            ...(prev[category.id] ?? emptyState()),
+            status: 'error',
+            error: 'Something went wrong. Please try again.',
+          },
+        }));
+        return false;
+      } finally {
+        inFlightCategoryIds.delete(category.id);
+      }
+    },
+    [weekId]
+  );
+
+  const rerollMovementSession = useCallback(
+    async (session: Session) => {
+      if (inFlightRerollIds.has(session.id)) return;
+      inFlightRerollIds.add(session.id);
+      setRerollingSessionId(session.id);
+
+      try {
+        const res = await fetch('/api/plan/reroll-movement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: session.id }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setCalendarError(data.error ?? 'Failed to shuffle routine');
+          return;
+        }
+
+        const updated = data.session as MovementSession;
+        mergeTargetAreas([updated]);
+        setGenState((prev) => {
+          const cat = prev[updated.category_id];
+          if (!cat) return prev;
+          return {
+            ...prev,
+            [updated.category_id]: {
+              ...cat,
+              sessions: cat.sessions.map((s) =>
+                s.id === updated.id ? updated : s
+              ),
+            },
+          };
+        });
+      } catch {
+        setCalendarError('Something went wrong shuffling this routine.');
+      } finally {
+        inFlightRerollIds.delete(session.id);
+        setRerollingSessionId((current) =>
+          current === session.id ? null : current
+        );
+      }
+    },
+    []
+  );
+
   const hydrateCategory = useCallback(
-    async (categoryId: string): Promise<'done' | 'idle'> => {
+    async (categoryId: string): Promise<HydrateResult> => {
       const current = genStateRef.current[categoryId];
       if (current?.status === 'done' && current.sessions.length > 0) {
         if (!snapshotsRef.current[categoryId]) {
           saveSnapshot(categoryId, current.sessions);
         }
-        return 'done';
+        return { status: 'done', sessions: current.sessions };
       }
       if (current?.status === 'generating' || current?.status === 'error') {
-        return 'idle';
+        return { status: 'idle', sessions: [] };
       }
 
       const existingPromise = hydratePromises.get(categoryId);
@@ -234,7 +407,7 @@ export function PlanGenerationStep({
         return existingPromise;
       }
 
-      const promise = (async (): Promise<'done' | 'idle'> => {
+      const promise = (async (): Promise<HydrateResult> => {
         setGenState((prev) => {
           const existing = prev[categoryId];
           if (
@@ -277,7 +450,7 @@ export function PlanGenerationStep({
                 },
               };
             });
-            return 'idle';
+            return { status: 'idle', sessions: [] };
           }
 
           const sessions = (data.sessions ?? []) as Session[];
@@ -303,7 +476,7 @@ export function PlanGenerationStep({
                 },
               };
             });
-            return 'done';
+            return { status: 'done', sessions };
           }
 
           setGenState((prev) => {
@@ -323,7 +496,7 @@ export function PlanGenerationStep({
               },
             };
           });
-          return 'idle';
+          return { status: 'idle', sessions: [] };
         } catch {
           setGenState((prev) => {
             const existing = prev[categoryId];
@@ -342,7 +515,7 @@ export function PlanGenerationStep({
               },
             };
           });
-          return 'idle';
+          return { status: 'idle', sessions: [] };
         } finally {
           hydratePromises.delete(categoryId);
         }
@@ -380,7 +553,7 @@ export function PlanGenerationStep({
       );
 
       const missing = results
-        .filter(({ result }) => result === 'idle')
+        .filter(({ result }) => result.status === 'idle')
         .map(({ category }) => category);
 
       if (missing.length === 0) return;
@@ -426,7 +599,60 @@ export function PlanGenerationStep({
   const allAiDone =
     aiPlanCategories.length === 0 ||
     aiPlanCategories.every((c) => genState[c.id]?.status === 'done');
+  const allMovementDone =
+    randomPickCategories.length === 0 ||
+    randomPickCategories.every((c) => genState[c.id]?.status === 'done');
+  const allPlansDone = allAiDone && allMovementDone;
   const showCalendar = allAiDone && aiPlanCategories.length > 0;
+
+  // After AI plans finish, hydrate then generate random_pick categories in parallel.
+  useEffect(() => {
+    if (!allAiDone) return;
+    if (randomPickCategories.length === 0) return;
+
+    const bootstrapKey = `${weekId}:${randomPickCategoryIdsKey}`;
+    if (movementBootstrappedKeys.has(bootstrapKey)) return;
+    movementBootstrappedKeys.add(bootstrapKey);
+
+    const categoriesAtStart = randomPickCategories;
+
+    async function run() {
+      const results = await Promise.all(
+        categoriesAtStart.map(async (category) => ({
+          category,
+          result: await hydrateCategory(category.id),
+        }))
+      );
+
+      const entryIds = results.flatMap(({ result }) =>
+        result.status === 'done'
+          ? result.sessions
+              .map((s) => s.library_entry_id)
+              .filter((id): id is string => Boolean(id))
+          : []
+      );
+      if (entryIds.length > 0) {
+        const areas = await loadTargetAreaMap(entryIds);
+        if (Object.keys(areas).length > 0) {
+          setTargetAreaByEntryId((prev) => ({ ...prev, ...areas }));
+        }
+      }
+
+      const missing = results
+        .filter(({ result }) => result.status === 'idle')
+        .map(({ category }) => category);
+      await Promise.all(missing.map((c) => generateMovementCategory(c)));
+    }
+
+    void run();
+  }, [
+    allAiDone,
+    weekId,
+    randomPickCategoryIdsKey,
+    randomPickCategories,
+    hydrateCategory,
+    generateMovementCategory,
+  ]);
 
   const calendarSessions: CalendarSession[] = useMemo(() => {
     if (!showCalendar) return [];
@@ -1154,44 +1380,182 @@ export function PlanGenerationStep({
             );
           })}
 
-          {randomPickCategories.map((category) => (
-            <li
-              key={category.id}
-              className="rounded border border-gray-700 bg-gray-900 p-4"
-            >
-              <div className="flex items-start gap-3">
-                <CategoryGlyph
-                  icon={category.icon}
-                  color={category.color}
-                  size={22}
-                  aria-label={`${category.name} icon`}
-                />
-                <div>
-                  <h3 className="text-sm font-semibold text-white">
-                    {category.name}
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-400">
-                    Will be generated after you confirm your training plan
-                  </p>
+          {randomPickCategories.map((category) => {
+            const state = genState[category.id] ?? emptyState();
+            // Detailed list below covers the done state.
+            if (allAiDone && state.status === 'done') return null;
+            return (
+              <li
+                key={category.id}
+                className="rounded border border-gray-700 bg-gray-900 p-4"
+              >
+                <div className="flex items-start gap-3">
+                  <CategoryGlyph
+                    icon={category.icon}
+                    color={category.color}
+                    size={22}
+                    aria-label={`${category.name} icon`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-white">
+                        {category.name}
+                      </h3>
+                      {!allAiDone && (
+                        <span className="text-xs text-gray-500">
+                          Waiting for training plan…
+                        </span>
+                      )}
+                      {allAiDone &&
+                        (state.status === 'generating' ||
+                          state.status === 'loading') && (
+                          <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                            <span
+                              className="h-3 w-3 animate-spin rounded-full border-2 border-gray-500 border-t-white"
+                              aria-hidden
+                            />
+                            {state.status === 'loading'
+                              ? 'Checking…'
+                              : 'Picking routines…'}
+                          </span>
+                        )}
+                    </div>
+                    {state.status === 'error' && (
+                      <p className="mt-2 text-sm text-red-400" role="alert">
+                        {state.error}
+                      </p>
+                    )}
+                    {allAiDone &&
+                      (state.status === 'idle' || state.status === 'error') && (
+                        <button
+                          type="button"
+                          onClick={() => void generateMovementCategory(category)}
+                          className="mt-3 text-xs text-white underline underline-offset-2 hover:text-gray-200"
+                        >
+                          {state.status === 'error' ? 'Retry' : 'Generate'}
+                        </button>
+                      )}
+                  </div>
                 </div>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 
-      {showCalendar && randomPickCategories.length > 0 && (
-        <ul className="space-y-2">
-          {randomPickCategories.map((category) => (
-            <li
+      {allAiDone &&
+        randomPickCategories.map((category) => {
+          const state = genState[category.id] ?? emptyState();
+          if (state.status !== 'done' || state.sessions.length === 0) {
+            if (showCalendar) {
+              return (
+                <div
+                  key={category.id}
+                  className="rounded border border-gray-700 bg-gray-900 p-4"
+                >
+                  <div className="flex items-center gap-2 text-sm text-gray-300">
+                    <CategoryGlyph
+                      icon={category.icon}
+                      color={category.color}
+                      size={16}
+                      aria-label={`${category.name} icon`}
+                    />
+                    <span className="font-medium text-white">
+                      {category.name}
+                    </span>
+                    {(state.status === 'generating' ||
+                      state.status === 'loading') && (
+                      <span className="text-xs text-gray-400">
+                        Picking routines…
+                      </span>
+                    )}
+                    {state.status === 'error' && (
+                      <button
+                        type="button"
+                        onClick={() => void generateMovementCategory(category)}
+                        className="text-xs text-red-400 underline underline-offset-2"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          }
+
+          return (
+            <div
               key={category.id}
-              className="rounded border border-gray-800 bg-gray-900/50 px-3 py-2 text-sm text-gray-400"
+              className="space-y-2 rounded border border-gray-700 bg-gray-900 p-4"
             >
-              {category.name}: will be generated after you confirm
-            </li>
-          ))}
-        </ul>
-      )}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <CategoryGlyph
+                    icon={category.icon}
+                    color={category.color}
+                    size={18}
+                    aria-label={`${category.name} icon`}
+                  />
+                  <h3 className="text-sm font-semibold text-white">
+                    {category.name}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void generateMovementCategory(category)}
+                  className="text-xs text-gray-400 underline underline-offset-2 hover:text-white"
+                >
+                  Regenerate
+                </button>
+              </div>
+              <ul className="divide-y divide-gray-800">
+                {sortSessionsByDay(state.sessions).map((session) => {
+                  const area =
+                    (session.library_entry_id &&
+                      targetAreaByEntryId[session.library_entry_id]) ||
+                    (session as MovementSession).target_area;
+                  const shuffling = rerollingSessionId === session.id;
+                  return (
+                    <li
+                      key={session.id}
+                      className="flex items-center justify-between gap-3 py-2 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-white">
+                          <span className="text-gray-500">
+                            {dayLabel(session.day_of_week)}
+                          </span>
+                          <span className="mx-1.5 text-gray-600">·</span>
+                          {session.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-400">
+                          {session.planned_duration_min ?? '—'} min
+                          <span className="mx-1.5 text-gray-600">·</span>
+                          {formatTargetArea(area)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={shuffling}
+                        onClick={() => void rerollMovementSession(session)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:border-gray-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label={`Shuffle ${session.title}`}
+                      >
+                        <Shuffle
+                          className={`h-3.5 w-3.5 ${shuffling ? 'animate-spin' : ''}`}
+                          aria-hidden
+                        />
+                        Shuffle
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
 
       {orderedAiPlan.length === 0 && randomPickCategories.length === 0 && (
         <p className="text-sm text-gray-500">
@@ -1201,11 +1565,11 @@ export function PlanGenerationStep({
 
       <button
         type="button"
-        disabled={!allAiDone}
+        disabled={!allPlansDone}
         onClick={onContinue}
         className="w-full rounded bg-white px-4 py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {allAiDone ? continueLabel : 'Waiting for plans…'}
+        {allPlansDone ? continueLabel : 'Waiting for plans…'}
       </button>
 
       {onBack && (

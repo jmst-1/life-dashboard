@@ -4,8 +4,10 @@ import { plannedDateForDay } from '@/lib/plan-context';
 import type {
   Category,
   CyclingZone,
+  MovementLibraryEntry,
   NutritionPlan,
   Profile,
+  RoutineStep,
   Session,
   SessionRenderer,
   StrengthBlock,
@@ -523,7 +525,110 @@ export type UpdateSessionInput = {
   planned_duration_min?: number | null;
   day_of_week?: number;
   planned_date?: string | null;
+  routine_steps?: RoutineStep[] | null;
+  library_entry_id?: string | null;
 };
+
+export async function getActiveMovementLibrary(
+  supabase: SupabaseClient
+): Promise<MovementLibraryEntry[]> {
+  const { data, error } = await supabase
+    .from('movement_library')
+    .select('*')
+    .eq('active', true);
+
+  if (error) {
+    console.error('getActiveMovementLibrary error:', error);
+    return [];
+  }
+
+  return (data ?? []) as MovementLibraryEntry[];
+}
+
+export async function getRecentMovementEntryIds(
+  supabase: SupabaseClient,
+  userId: string,
+  withinDays = 3
+): Promise<string[]> {
+  const since = new Date();
+  since.setDate(since.getDate() - withinDays);
+  const sinceIso = since.toISOString();
+
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('library_entry_id, completed_at, created_at')
+    .eq('user_id', userId)
+    .not('library_entry_id', 'is', null);
+
+  if (error) {
+    console.error('getRecentMovementEntryIds error:', error);
+    return [];
+  }
+
+  const ids = new Set<string>();
+  for (const row of data ?? []) {
+    const entryId = row.library_entry_id as string | null;
+    if (!entryId) continue;
+    const completedAt = row.completed_at as string | null;
+    const createdAt = row.created_at as string | null;
+    const inWindow =
+      (completedAt != null && completedAt >= sinceIso) ||
+      (createdAt != null && createdAt >= sinceIso);
+    if (inWindow) ids.add(entryId);
+  }
+
+  return Array.from(ids);
+}
+
+export async function insertMovementSessions(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string,
+  categoryId: string,
+  weekStart: string,
+  picks: Record<number, MovementLibraryEntry>
+): Promise<{ sessions: Session[]; error: string | null }> {
+  const days = [0, 1, 2, 3, 4, 5, 6] as const;
+  const rows = days.map((day, index) => {
+    const pick = picks[day];
+    return {
+      week_id: weekId,
+      user_id: userId,
+      category_id: categoryId,
+      day_of_week: day,
+      planned_date: plannedDateForDay(weekStart, day),
+      title: pick.name,
+      description: null,
+      planned_duration_min: pick.duration_min,
+      session_type: 'random_pick',
+      sort_order: index,
+      zones: null,
+      blocks: null,
+      routine_steps: JSON.parse(JSON.stringify(pick.steps)) as RoutineStep[],
+      exercise_log: null,
+      library_entry_id: pick.id,
+    };
+  });
+
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert(rows)
+    .select('*');
+
+  if (error) {
+    console.error('insertMovementSessions error:', error);
+    return { sessions: [], error: error.message };
+  }
+
+  const sessions = ((data ?? []) as Session[]).sort((a, b) => {
+    if (a.day_of_week !== b.day_of_week) {
+      return a.day_of_week - b.day_of_week;
+    }
+    return a.sort_order - b.sort_order;
+  });
+
+  return { sessions, error: null };
+}
 
 export async function getSessionById(
   supabase: SupabaseClient,
