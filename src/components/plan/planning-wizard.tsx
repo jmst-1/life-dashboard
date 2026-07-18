@@ -46,6 +46,9 @@ export function PlanningWizard({
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(
     null
   );
+  const [nutritionFingerprint, setNutritionFingerprint] = useState<
+    string | null
+  >(null);
 
   const selectedCategories = categories.filter(
     (c) => selectedCategoryIds[c.id] !== false
@@ -53,6 +56,12 @@ export function PlanningWizard({
   const hasNutritionCategories = selectedCategories.some(
     (c) => c.affects_nutrition
   );
+  const selectedCategoryIdList = selectedCategories.map((c) => c.id);
+
+  function handleNutritionPlanReady(plan: NutritionPlan, fingerprint: string) {
+    setNutritionPlan(plan);
+    setNutritionFingerprint(fingerprint);
+  }
 
   function toggleCategory(id: string) {
     setSelectedCategoryIds((prev) => ({
@@ -298,10 +307,12 @@ export function PlanningWizard({
   const step3 = (
     <PlanGenerationStep
       weekId={week.id}
+      weekStart={week.week_start}
       planningNotes={planningNotes}
       categories={categories}
       selectedCategoryIds={selectedCategoryIds}
       onContinue={handleAfterPlans}
+      onBack={() => setStep(1)}
       continueLabel={
         hasNutritionCategories ? 'Next: Nutrition' : 'Next: Confirm'
       }
@@ -311,8 +322,12 @@ export function PlanningWizard({
   const step4 = (
     <NutritionStep
       weekId={week.id}
+      categoryIds={selectedCategoryIdList}
+      initialPlan={nutritionPlan}
+      initialFingerprint={nutritionFingerprint}
       onContinue={() => setStep(4)}
-      onPlanReady={setNutritionPlan}
+      onBack={() => setStep(2)}
+      onPlanReady={handleNutritionPlanReady}
     />
   );
 
@@ -323,6 +338,7 @@ export function PlanningWizard({
       selectedCategoryIds={selectedCategoryIds}
       nutritionPlan={nutritionPlan}
       weightKgSnapshot={displayWeight}
+      onBack={() => setStep(hasNutritionCategories ? 3 : 2)}
     />
   );
 

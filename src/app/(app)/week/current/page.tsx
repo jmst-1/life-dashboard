@@ -48,7 +48,7 @@ export default async function CurrentWeekPage({
   return (
     <div className="min-h-screen bg-gray-950 px-4 py-8 pb-24 text-white">
       <div className="mx-auto max-w-md space-y-6">
-        {searchParams.locked === '1' && (
+        {searchParams.locked === '1' && week.status === 'complete' && (
           <p
             className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200"
             role="status"
@@ -77,6 +77,15 @@ export default async function CurrentWeekPage({
             className="inline-flex text-sm font-medium text-white underline underline-offset-2 hover:text-gray-200"
           >
             Plan this week →
+          </Link>
+        )}
+
+        {week.status === 'active' && (
+          <Link
+            href="/plan"
+            className="inline-flex text-sm font-medium text-white underline underline-offset-2 hover:text-gray-200"
+          >
+            Edit plan →
           </Link>
         )}
 

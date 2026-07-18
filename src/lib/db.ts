@@ -521,7 +521,29 @@ export async function insertGeneratedSessions(
 export type UpdateSessionInput = {
   title?: string;
   planned_duration_min?: number | null;
+  day_of_week?: number;
+  planned_date?: string | null;
 };
+
+export async function getSessionById(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string
+): Promise<Session | null> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('getSessionById error:', error);
+    return null;
+  }
+
+  return data as Session | null;
+}
 
 export async function updateSession(
   supabase: SupabaseClient,
@@ -547,6 +569,280 @@ export async function updateSession(
   }
 
   return { session: data as Session, error: null };
+}
+
+export async function deleteSession(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string
+): Promise<{ error: string | null }> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    console.error('deleteSession error:', error);
+    return { error: error.message };
+  }
+
+  if (!data) {
+    return { error: 'Session not found' };
+  }
+
+  return { error: null };
+}
+
+export type InsertSessionSnapshotInput = {
+  id: string;
+  weekId: string;
+  categoryId: string;
+  day_of_week: number;
+  planned_date: string;
+  title: string;
+  description: string | null;
+  planned_duration_min: number | null;
+  sort_order: number;
+  session_type: string;
+  zones: Session['zones'];
+  blocks: Session['blocks'];
+};
+
+export async function insertSessionFromSnapshot(
+  supabase: SupabaseClient,
+  userId: string,
+  input: InsertSessionSnapshotInput
+): Promise<{ session: Session | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert({
+      id: input.id,
+      week_id: input.weekId,
+      user_id: userId,
+      category_id: input.categoryId,
+      day_of_week: input.day_of_week,
+      planned_date: input.planned_date,
+      title: input.title,
+      description: input.description,
+      planned_duration_min: input.planned_duration_min,
+      sort_order: input.sort_order,
+      session_type: input.session_type,
+      zones: input.zones,
+      blocks: input.blocks,
+      routine_steps: null,
+      exercise_log: null,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('insertSessionFromSnapshot error:', error);
+    return { session: null, error: error.message };
+  }
+
+  return { session: data as Session, error: null };
+}
+
+export async function swapSessionDays(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string,
+  sessionIdA: string,
+  sessionIdB: string
+): Promise<{ sessions: Session[]; error: string | null }> {
+  const [sessionA, sessionB] = await Promise.all([
+    getSessionById(supabase, userId, sessionIdA),
+    getSessionById(supabase, userId, sessionIdB),
+  ]);
+
+  if (!sessionA || !sessionB) {
+    return { sessions: [], error: 'Session not found' };
+  }
+
+  if (
+    sessionA.week_id !== weekId ||
+    sessionB.week_id !== weekId ||
+    sessionA.category_id !== sessionB.category_id ||
+    sessionA.user_id !== userId ||
+    sessionB.user_id !== userId
+  ) {
+    return { sessions: [], error: 'Sessions cannot be swapped' };
+  }
+
+  if (sessionA.id === sessionB.id) {
+    return { sessions: [sessionA], error: null };
+  }
+
+  const slotA = {
+    day_of_week: sessionA.day_of_week,
+    planned_date: sessionA.planned_date,
+    sort_order: sessionA.sort_order,
+  };
+  const slotB = {
+    day_of_week: sessionB.day_of_week,
+    planned_date: sessionB.planned_date,
+    sort_order: sessionB.sort_order,
+  };
+
+  const [stageA, stageB] = await Promise.all([
+    supabase
+      .from('sessions')
+      .update({ day_of_week: 100, sort_order: -1 })
+      .eq('id', sessionA.id)
+      .eq('user_id', userId),
+    supabase
+      .from('sessions')
+      .update({ day_of_week: 101, sort_order: -2 })
+      .eq('id', sessionB.id)
+      .eq('user_id', userId),
+  ]);
+
+  if (stageA.error || stageB.error) {
+    const message =
+      stageA.error?.message ?? stageB.error?.message ?? 'Failed to stage swap';
+    console.error('swapSessionDays stage error:', message);
+    return { sessions: [], error: message };
+  }
+
+  const [updateA, updateB] = await Promise.all([
+    supabase
+      .from('sessions')
+      .update({
+        day_of_week: slotB.day_of_week,
+        planned_date: slotB.planned_date,
+        sort_order: slotB.sort_order,
+      })
+      .eq('id', sessionA.id)
+      .eq('user_id', userId)
+      .select('*')
+      .single(),
+    supabase
+      .from('sessions')
+      .update({
+        day_of_week: slotA.day_of_week,
+        planned_date: slotA.planned_date,
+        sort_order: slotA.sort_order,
+      })
+      .eq('id', sessionB.id)
+      .eq('user_id', userId)
+      .select('*')
+      .single(),
+  ]);
+
+  if (updateA.error || updateB.error || !updateA.data || !updateB.data) {
+    const message =
+      updateA.error?.message ??
+      updateB.error?.message ??
+      'Failed to swap sessions';
+    console.error('swapSessionDays update error:', message);
+    return { sessions: [], error: message };
+  }
+
+  return {
+    sessions: sortSessionsByDay([
+      updateA.data as Session,
+      updateB.data as Session,
+    ]),
+    error: null,
+  };
+}
+
+function sortSessionsByDay(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => {
+    if (a.day_of_week !== b.day_of_week) {
+      return a.day_of_week - b.day_of_week;
+    }
+    return a.sort_order - b.sort_order;
+  });
+}
+
+export async function reorderCategorySessions(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string,
+  categoryId: string,
+  orderedSessionIds: string[]
+): Promise<{ sessions: Session[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('week_id', weekId)
+    .eq('category_id', categoryId)
+    .order('day_of_week')
+    .order('sort_order');
+
+  if (error) {
+    console.error('reorderCategorySessions load error:', error);
+    return { sessions: [], error: error.message };
+  }
+
+  const current = sortSessionsByDay((data ?? []) as Session[]);
+  const currentIds = current.map((s) => s.id);
+
+  if (
+    orderedSessionIds.length !== currentIds.length ||
+    new Set(orderedSessionIds).size !== orderedSessionIds.length ||
+    !orderedSessionIds.every((id) => currentIds.includes(id))
+  ) {
+    return {
+      sessions: [],
+      error: 'Session list is not a valid permutation',
+    };
+  }
+
+  const slots = current.map((s) => ({
+    day_of_week: s.day_of_week,
+    planned_date: s.planned_date,
+    sort_order: s.sort_order,
+  }));
+
+  // Stage unique temporary sort_orders so day swaps cannot collide mid-update.
+  for (let i = 0; i < orderedSessionIds.length; i++) {
+    const { error: stageError } = await supabase
+      .from('sessions')
+      .update({
+        day_of_week: 100 + i,
+        sort_order: -(i + 1),
+      })
+      .eq('id', orderedSessionIds[i])
+      .eq('user_id', userId);
+
+    if (stageError) {
+      console.error('reorderCategorySessions stage error:', stageError);
+      return { sessions: [], error: stageError.message };
+    }
+  }
+
+  const updated: Session[] = [];
+  for (let i = 0; i < orderedSessionIds.length; i++) {
+    const slot = slots[i];
+    const { data: row, error: updateError } = await supabase
+      .from('sessions')
+      .update({
+        day_of_week: slot.day_of_week,
+        planned_date: slot.planned_date,
+        sort_order: slot.sort_order,
+      })
+      .eq('id', orderedSessionIds[i])
+      .eq('user_id', userId)
+      .select('*')
+      .single();
+
+    if (updateError || !row) {
+      console.error('reorderCategorySessions update error:', updateError);
+      return {
+        sessions: [],
+        error: updateError?.message ?? 'Failed to reorder sessions',
+      };
+    }
+    updated.push(row as Session);
+  }
+
+  return { sessions: sortSessionsByDay(updated), error: null };
 }
 
 export async function getNutritionPlanByWeek(

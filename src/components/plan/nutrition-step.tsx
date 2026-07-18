@@ -2,29 +2,80 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NutritionCard } from '@/components/plan/nutrition-card';
-import type { NutritionPlan } from '@/types';
+import type { NutritionPlan, Session } from '@/types';
 
-/** Survives Strict Mode remounts so auto-generate only fires once per week. */
-const autoStartedWeeks = new Set<string>();
+/** In-flight full generates keyed by weekId + fingerprint (Strict Mode safe). */
+const generatePromises = new Map<string, Promise<NutritionPlan | null>>();
+
+function sessionsFingerprint(sessions: Session[]): string {
+  return sessions
+    .map(
+      (s) =>
+        `${s.id}:${s.category_id}:${s.day_of_week}:${s.planned_duration_min ?? ''}`
+    )
+    .sort()
+    .join('|');
+}
+
+async function fetchWeekSessions(
+  weekId: string,
+  categoryIds: string[]
+): Promise<Session[]> {
+  if (categoryIds.length === 0) return [];
+
+  const batches = await Promise.all(
+    categoryIds.map(async (categoryId) => {
+      const res = await fetch(
+        `/api/sessions?weekId=${encodeURIComponent(weekId)}&categoryId=${encodeURIComponent(categoryId)}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to load sessions');
+      }
+      return (data.sessions ?? []) as Session[];
+    })
+  );
+
+  return batches.flat();
+}
 
 type NutritionStepProps = {
   weekId: string;
+  categoryIds: string[];
+  initialPlan?: NutritionPlan | null;
+  initialFingerprint?: string | null;
   onContinue: () => void;
-  onPlanReady?: (plan: NutritionPlan) => void;
+  onBack?: () => void;
+  onPlanReady?: (plan: NutritionPlan, fingerprint: string) => void;
 };
 
 export function NutritionStep({
   weekId,
+  categoryIds,
+  initialPlan = null,
+  initialFingerprint = null,
   onContinue,
+  onBack,
   onPlanReady,
 }: NutritionStepProps) {
-  const [plan, setPlan] = useState<NutritionPlan | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [plan, setPlan] = useState<NutritionPlan | null>(initialPlan);
+  const [loading, setLoading] = useState(!initialPlan);
   const [briefLoading, setBriefLoading] = useState(false);
   const [recalcLoading, setRecalcLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const onPlanReadyRef = useRef(onPlanReady);
   onPlanReadyRef.current = onPlanReady;
+  const fingerprintRef = useRef<string | null>(initialFingerprint);
+  const categoryIdsKey = categoryIds.join(',');
+
+  const reportPlan = useCallback(
+    (next: NutritionPlan, fingerprint: string) => {
+      fingerprintRef.current = fingerprint;
+      setPlan(next);
+      onPlanReadyRef.current?.(next, fingerprint);
+    },
+    []
+  );
 
   const generate = useCallback(
     async (mode: 'full' | 'brief_only') => {
@@ -38,37 +89,163 @@ export function NutritionStep({
       }
 
       try {
-        const res = await fetch('/api/nutrition/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ weekId, mode }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setError(data.error ?? 'Failed to generate nutrition plan');
-          return;
+        let fingerprint = fingerprintRef.current;
+        if (mode === 'full') {
+          const sessions = await fetchWeekSessions(
+            weekId,
+            categoryIdsKey ? categoryIdsKey.split(',') : []
+          );
+          fingerprint = sessionsFingerprint(sessions);
         }
-        const next = data.nutritionPlan as NutritionPlan;
-        setPlan(next);
-        onPlanReadyRef.current?.(next);
-      } catch {
-        setError('Something went wrong. Please try again.');
+
+        const cacheKey =
+          mode === 'full' && fingerprint
+            ? `${weekId}:${fingerprint}`
+            : null;
+
+        if (cacheKey) {
+          const existing = generatePromises.get(cacheKey);
+          if (existing) {
+            const shared = await existing;
+            if (shared) {
+              reportPlan(shared, fingerprint!);
+            }
+            return;
+          }
+        }
+
+        const run = (async (): Promise<NutritionPlan | null> => {
+          const res = await fetch('/api/nutrition/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ weekId, mode }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error ?? 'Failed to generate nutrition plan');
+          }
+          return data.nutritionPlan as NutritionPlan;
+        })();
+
+        if (cacheKey) {
+          generatePromises.set(cacheKey, run);
+        }
+
+        try {
+          const next = await run;
+          if (!next) return;
+          if (mode === 'full') {
+            reportPlan(next, fingerprint ?? sessionsFingerprint([]));
+          } else {
+            setPlan(next);
+            onPlanReadyRef.current?.(
+              next,
+              fingerprintRef.current ?? sessionsFingerprint([])
+            );
+          }
+        } finally {
+          if (cacheKey) {
+            generatePromises.delete(cacheKey);
+          }
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Something went wrong. Please try again.'
+        );
       } finally {
         setLoading(false);
         setBriefLoading(false);
         setRecalcLoading(false);
       }
     },
-    [weekId, plan]
+    [weekId, categoryIdsKey, plan, reportPlan]
   );
 
   useEffect(() => {
-    if (autoStartedWeeks.has(weekId)) return;
-    autoStartedWeeks.add(weekId);
-    void generate('full');
-    // Intentionally run once per weekId on mount
+    let cancelled = false;
+
+    async function bootstrap() {
+      setError(null);
+      try {
+        const sessions = await fetchWeekSessions(
+          weekId,
+          categoryIdsKey ? categoryIdsKey.split(',') : []
+        );
+        if (cancelled) return;
+
+        const fingerprint = sessionsFingerprint(sessions);
+
+        if (
+          initialPlan &&
+          initialFingerprint &&
+          fingerprint === initialFingerprint
+        ) {
+          fingerprintRef.current = fingerprint;
+          setPlan(initialPlan);
+          setLoading(false);
+          return;
+        }
+
+        setLoading(true);
+        const cacheKey = `${weekId}:${fingerprint}`;
+        const existing = generatePromises.get(cacheKey);
+        if (existing) {
+          const shared = await existing;
+          if (cancelled) return;
+          if (shared) {
+            reportPlan(shared, fingerprint);
+          }
+          setLoading(false);
+          return;
+        }
+
+        const run = (async (): Promise<NutritionPlan | null> => {
+          const res = await fetch('/api/nutrition/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ weekId, mode: 'full' }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error ?? 'Failed to generate nutrition plan');
+          }
+          return data.nutritionPlan as NutritionPlan;
+        })();
+
+        generatePromises.set(cacheKey, run);
+        try {
+          const next = await run;
+          if (cancelled) return;
+          if (next) {
+            reportPlan(next, fingerprint);
+          }
+        } finally {
+          generatePromises.delete(cacheKey);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Something went wrong. Please try again.'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+    // Bootstrap when week or selected categories change; initial* used for hydrate check
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekId]);
+  }, [weekId, categoryIdsKey]);
 
   return (
     <section className="space-y-4">
@@ -130,6 +307,16 @@ export function NutritionStep({
       >
         Next: Confirm
       </button>
+
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="w-full rounded border border-gray-700 px-4 py-2.5 text-sm text-gray-300 hover:border-gray-500"
+        >
+          Back
+        </button>
+      )}
     </section>
   );
 }

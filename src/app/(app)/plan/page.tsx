@@ -16,7 +16,8 @@ export default async function PlanPage() {
 
   const week = await getOrCreateCurrentWeek(supabase, user.id);
 
-  if (week.status === 'active' || week.status === 'complete') {
+  // Complete weeks stay locked; active weeks can re-open the wizard to edit.
+  if (week.status === 'complete') {
     redirect('/week/current?locked=1');
   }
 

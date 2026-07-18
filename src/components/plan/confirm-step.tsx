@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CategoryGlyph } from '@/components/categories/category-glyph';
 import { NutritionCard } from '@/components/plan/nutrition-card';
-import { dayLabel } from '@/lib/plan-context';
+import {
+  WeekPlanCalendar,
+  type CalendarSession,
+} from '@/components/plan/week-plan-calendar';
 import type { Category, NutritionPlan, Session } from '@/types';
 
 type ConfirmStepProps = {
@@ -13,7 +16,20 @@ type ConfirmStepProps = {
   selectedCategoryIds: Record<string, boolean>;
   nutritionPlan: NutritionPlan | null;
   weightKgSnapshot: number | null;
+  onBack?: () => void;
 };
+
+function isRestSession(session: Session): boolean {
+  if (session.planned_duration_min === 0) return true;
+  return /^\s*rest(\s+day)?\s*$/i.test(session.title);
+}
+
+function plannedMinutes(sessions: Session[]): number {
+  return sessions.reduce(
+    (sum, session) => sum + (session.planned_duration_min ?? 0),
+    0
+  );
+}
 
 export function ConfirmStep({
   weekId,
@@ -21,6 +37,7 @@ export function ConfirmStep({
   selectedCategoryIds,
   nutritionPlan,
   weightKgSnapshot,
+  onBack,
 }: ConfirmStepProps) {
   const router = useRouter();
   const selected = categories.filter(
@@ -75,6 +92,18 @@ export function ConfirmStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekId, categories, selectedCategoryIds]);
 
+  const calendarSessions: CalendarSession[] = useMemo(() => {
+    const items: CalendarSession[] = [];
+    for (const category of selected) {
+      const sessions = sessionsByCategory[category.id] ?? [];
+      for (const session of sessions) {
+        if (isRestSession(session)) continue;
+        items.push({ ...session, category });
+      }
+    }
+    return items;
+  }, [selected, sessionsByCategory]);
+
   async function handleStartWeek() {
     setError(null);
     setActivating(true);
@@ -125,62 +154,54 @@ export function ConfirmStep({
           Loading summary…
         </div>
       ) : (
-        <ul className="space-y-3">
-          {selected.map((category) => {
-            const sessions = sessionsByCategory[category.id] ?? [];
-            return (
-              <li
-                key={category.id}
-                className="rounded border border-gray-700 bg-gray-900 p-4"
-              >
-                <div className="flex items-start gap-3">
-                  <CategoryGlyph
-                    icon={category.icon}
-                    color={category.color}
-                    size={22}
-                    aria-label={`${category.name} icon`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-semibold text-white">
+        <>
+          <ul className="space-y-2 rounded border border-gray-700 bg-gray-900 p-4">
+            <li className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              Planned minutes
+            </li>
+            {selected.map((category) => {
+              const sessions = sessionsByCategory[category.id] ?? [];
+              const isPendingRandom =
+                category.tracking_type === 'random_pick' && sessions.length === 0;
+              const minutes = plannedMinutes(sessions);
+
+              return (
+                <li
+                  key={category.id}
+                  className="flex items-center justify-between gap-3 text-sm"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <CategoryGlyph
+                      icon={category.icon}
+                      color={category.color}
+                      size={18}
+                      aria-label={`${category.name} icon`}
+                    />
+                    <span className="truncate font-medium text-white">
                       {category.name}
-                    </h3>
-                    {sessions.length === 0 ? (
-                      <p className="mt-1 text-sm text-gray-500">
-                        {category.tracking_type === 'random_pick'
-                          ? 'Will be generated after you confirm'
-                          : 'No sessions planned'}
-                      </p>
-                    ) : (
-                      <ul className="mt-2 space-y-1">
-                        {sessions.map((session) => (
-                          <li
-                            key={session.id}
-                            className="flex justify-between gap-2 text-sm text-gray-300"
-                          >
-                            <span className="truncate">
-                              <span className="text-gray-500">
-                                {dayLabel(session.day_of_week)}
-                              </span>{' '}
-                              {session.title}
-                            </span>
-                            <span className="shrink-0 tabular-nums text-gray-500">
-                              {session.planned_duration_min != null
-                                ? `${session.planned_duration_min} min`
-                                : '—'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    </span>
                   </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                  {isPendingRandom ? (
+                    <span className="shrink-0 text-right text-xs text-gray-500">
+                      Will be generated after you confirm
+                    </span>
+                  ) : (
+                    <span className="shrink-0 tabular-nums text-gray-300">
+                      {minutes} min
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
+          <WeekPlanCalendar sessions={calendarSessions} readOnly />
+        </>
       )}
 
-      {nutritionPlan && <NutritionCard plan={nutritionPlan} />}
+      {nutritionPlan && (
+        <NutritionCard plan={nutritionPlan} showMealBrief={false} />
+      )}
 
       {error && (
         <p className="text-sm text-red-400" role="alert">
@@ -196,6 +217,17 @@ export function ConfirmStep({
       >
         {activating ? 'Starting…' : 'Start my week'}
       </button>
+
+      {onBack && (
+        <button
+          type="button"
+          disabled={activating}
+          onClick={onBack}
+          className="w-full rounded border border-gray-700 px-4 py-2.5 text-sm text-gray-300 hover:border-gray-500 disabled:opacity-50"
+        >
+          Back
+        </button>
+      )}
     </section>
   );
 }

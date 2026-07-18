@@ -16,6 +16,7 @@ const DAY_TYPE_LABEL: Record<DayType, string> = {
 type NutritionCardProps = {
   plan: NutritionPlan;
   showActions?: boolean;
+  showMealBrief?: boolean;
   briefLoading?: boolean;
   recalcLoading?: boolean;
   onRegenerateBrief?: () => void;
@@ -25,6 +26,7 @@ type NutritionCardProps = {
 export function NutritionCard({
   plan,
   showActions = false,
+  showMealBrief = true,
   briefLoading = false,
   recalcLoading = false,
   onRegenerateBrief,
@@ -84,14 +86,16 @@ export function NutritionCard({
         })}
       </ul>
 
-      <div className="border-t border-gray-800 pt-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-          Meal prep brief
-        </p>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
-          {plan.meal_prep_brief}
-        </p>
-      </div>
+      {showMealBrief && (
+        <div className="border-t border-gray-800 pt-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Meal prep brief
+          </p>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+            {plan.meal_prep_brief}
+          </p>
+        </div>
+      )}
 
       {showActions && (
         <div className="flex flex-wrap gap-3 border-t border-gray-800 pt-3">

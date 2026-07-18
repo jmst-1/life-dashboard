@@ -1,8 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CategoryGlyph } from '@/components/categories/category-glyph';
-import { dayLabel } from '@/lib/plan-context';
+import {
+  WeekPlanCalendar,
+  type CalendarSession,
+} from '@/components/plan/week-plan-calendar';
+import { plannedDateForDay } from '@/lib/plan-context';
 import type { Category, Session } from '@/types';
 
 /** Survives React Strict Mode remounts so auto-gen only fires once per week. */
@@ -29,10 +33,12 @@ type CategoryGenState = {
 
 type PlanGenerationStepProps = {
   weekId: string;
+  weekStart: string;
   planningNotes: string;
   categories: Category[];
   selectedCategoryIds: Record<string, boolean>;
   onContinue: () => void;
+  onBack?: () => void;
   continueLabel?: string;
 };
 
@@ -46,12 +52,53 @@ function emptyState(): CategoryGenState {
   };
 }
 
+function sortSessionsByDay(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => {
+    if (a.day_of_week !== b.day_of_week) {
+      return a.day_of_week - b.day_of_week;
+    }
+    return a.sort_order - b.sort_order;
+  });
+}
+
+function isRestSession(session: Session): boolean {
+  if (session.planned_duration_min === 0) return true;
+  return /^\s*rest(\s+day)?\s*$/i.test(session.title);
+}
+
+function cloneSessions(sessions: Session[]): Session[] {
+  return sessions.map((s) => ({ ...s }));
+}
+
+function sessionsMatchSnapshot(
+  sessions: Session[],
+  snapshot: Session[] | undefined
+): boolean {
+  if (!snapshot || snapshot.length !== sessions.length) return false;
+  const byId = new Map(snapshot.map((s) => [s.id, s]));
+  for (const session of sessions) {
+    const original = byId.get(session.id);
+    if (!original) return false;
+    if (
+      original.day_of_week !== session.day_of_week ||
+      original.sort_order !== session.sort_order ||
+      original.title !== session.title ||
+      original.planned_duration_min !== session.planned_duration_min
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function PlanGenerationStep({
   weekId,
+  weekStart,
   planningNotes,
   categories,
   selectedCategoryIds,
   onContinue,
+  onBack,
   continueLabel = 'Next: Nutrition',
 }: PlanGenerationStepProps) {
   const selected = categories.filter(
@@ -82,8 +129,16 @@ export function PlanGenerationStep({
   const [editTitle, setEditTitle] = useState('');
   const [editDuration, setEditDuration] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [movingSession, setMovingSession] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const genStateRef = useRef(genState);
   genStateRef.current = genState;
+  const snapshotsRef = useRef<Record<string, Session[]>>({});
+
+  function saveSnapshot(categoryId: string, sessions: Session[]) {
+    snapshotsRef.current[categoryId] = cloneSessions(sessions);
+  }
 
   const activeCategoryIds = selected.map((c) => c.id);
   const activeCategoryIdsKey = activeCategoryIds.join(',');
@@ -131,13 +186,15 @@ export function PlanGenerationStep({
           return false;
         }
 
+        const sessions = (data.sessions ?? []) as Session[];
+        saveSnapshot(category.id, sessions);
         setGenState((prev) => ({
           ...prev,
           [category.id]: {
             status: 'done',
             weekTheme: data.week_theme ?? null,
             weekNote: data.week_note ?? null,
-            sessions: (data.sessions ?? []) as Session[],
+            sessions,
             error: null,
           },
         }));
@@ -163,6 +220,9 @@ export function PlanGenerationStep({
     async (categoryId: string): Promise<'done' | 'idle'> => {
       const current = genStateRef.current[categoryId];
       if (current?.status === 'done' && current.sessions.length > 0) {
+        if (!snapshotsRef.current[categoryId]) {
+          saveSnapshot(categoryId, current.sessions);
+        }
         return 'done';
       }
       if (current?.status === 'generating' || current?.status === 'error') {
@@ -222,6 +282,7 @@ export function PlanGenerationStep({
 
           const sessions = (data.sessions ?? []) as Session[];
           if (sessions.length > 0) {
+            saveSnapshot(categoryId, sessions);
             setGenState((prev) => {
               const existing = prev[categoryId];
               if (
@@ -365,8 +426,39 @@ export function PlanGenerationStep({
   const allAiDone =
     aiPlanCategories.length === 0 ||
     aiPlanCategories.every((c) => genState[c.id]?.status === 'done');
+  const showCalendar = allAiDone && aiPlanCategories.length > 0;
 
-  async function saveSessionEdit(session: Session, categoryId: string) {
+  const calendarSessions: CalendarSession[] = useMemo(() => {
+    if (!showCalendar) return [];
+    const categoriesById = Object.fromEntries(
+      aiPlanCategories.map((c) => [c.id, c])
+    );
+    const items: CalendarSession[] = [];
+    for (const category of aiPlanCategories) {
+      const state = genState[category.id];
+      if (!state || state.status !== 'done') continue;
+      for (const session of state.sessions) {
+        if (isRestSession(session)) continue;
+        const cat = categoriesById[session.category_id] ?? category;
+        items.push({ ...session, category: cat });
+      }
+    }
+    return items;
+  }, [showCalendar, aiPlanCategories, genState]);
+
+  const hasCalendarChanges = useMemo(() => {
+    if (!showCalendar) return false;
+    return aiPlanCategories.some((category) => {
+      const state = genState[category.id];
+      if (!state || state.status !== 'done') return false;
+      return !sessionsMatchSnapshot(
+        state.sessions,
+        snapshotsRef.current[category.id]
+      );
+    });
+  }, [showCalendar, aiPlanCategories, genState]);
+
+  async function saveSessionEdit(session: Session) {
     setEditSaving(true);
     try {
       const title = editTitle.trim();
@@ -399,11 +491,11 @@ export function PlanGenerationStep({
 
       const updated = data.session as Session;
       setGenState((prev) => {
-        const cat = prev[categoryId];
+        const cat = prev[updated.category_id];
         if (!cat) return prev;
         return {
           ...prev,
-          [categoryId]: {
+          [updated.category_id]: {
             ...cat,
             sessions: cat.sessions.map((s) =>
               s.id === updated.id ? updated : s
@@ -417,6 +509,492 @@ export function PlanGenerationStep({
     }
   }
 
+  async function swapSessions(sessionA: Session, sessionB: Session) {
+    const categoryId = sessionA.category_id;
+    const cat = genStateRef.current[categoryId];
+    if (!cat || cat.status !== 'done') return;
+
+    const previous = cat.sessions;
+    const optimistic = previous.map((s) => {
+      if (s.id === sessionA.id) {
+        return {
+          ...s,
+          day_of_week: sessionB.day_of_week,
+          planned_date: sessionB.planned_date,
+          sort_order: sessionB.sort_order,
+        };
+      }
+      if (s.id === sessionB.id) {
+        return {
+          ...s,
+          day_of_week: sessionA.day_of_week,
+          planned_date: sessionA.planned_date,
+          sort_order: sessionA.sort_order,
+        };
+      }
+      return s;
+    });
+
+    setMovingSession(true);
+    setCalendarError(null);
+    setGenState((prev) => {
+      const existing = prev[categoryId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [categoryId]: {
+          ...existing,
+          sessions: optimistic,
+        },
+      };
+    });
+
+    try {
+      const res = await fetch('/api/sessions/swap-days', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weekId,
+          sessionIdA: sessionA.id,
+          sessionIdB: sessionB.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGenState((prev) => {
+          const existing = prev[categoryId];
+          if (!existing) return prev;
+          return {
+            ...prev,
+            [categoryId]: {
+              ...existing,
+              sessions: previous,
+            },
+          };
+        });
+        setCalendarError(data.error ?? 'Failed to move session');
+        return;
+      }
+
+      const swapped = (data.sessions ?? []) as Session[];
+      setGenState((prev) => {
+        const existing = prev[categoryId];
+        if (!existing) return prev;
+        const byId = new Map(swapped.map((s) => [s.id, s]));
+        return {
+          ...prev,
+          [categoryId]: {
+            ...existing,
+            sessions: existing.sessions.map((s) => byId.get(s.id) ?? s),
+          },
+        };
+      });
+    } catch {
+      setGenState((prev) => {
+        const existing = prev[categoryId];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [categoryId]: {
+            ...existing,
+            sessions: previous,
+          },
+        };
+      });
+      setCalendarError('Something went wrong. Please try again.');
+    } finally {
+      setMovingSession(false);
+    }
+  }
+
+  async function handleDeleteSession(sessionId: string) {
+    if (movingSession || resetting) return;
+
+    let session: Session | undefined;
+    for (const category of aiPlanCategories) {
+      const found = genStateRef.current[category.id]?.sessions.find(
+        (s) => s.id === sessionId
+      );
+      if (found) {
+        session = found;
+        break;
+      }
+    }
+    if (!session) return;
+
+    const categoryId = session.category_id;
+    const cat = genStateRef.current[categoryId];
+    if (!cat) return;
+    const previous = cat.sessions;
+
+    setMovingSession(true);
+    setCalendarError(null);
+    if (editingSessionId === sessionId) {
+      setEditingSessionId(null);
+    }
+    setGenState((prev) => {
+      const existing = prev[categoryId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [categoryId]: {
+          ...existing,
+          sessions: existing.sessions.filter((s) => s.id !== sessionId),
+        },
+      };
+    });
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setGenState((prev) => {
+          const existing = prev[categoryId];
+          if (!existing) return prev;
+          return {
+            ...prev,
+            [categoryId]: {
+              ...existing,
+              sessions: previous,
+            },
+          };
+        });
+        setCalendarError(
+          (data as { error?: string }).error ?? 'Failed to delete session'
+        );
+      }
+    } catch {
+      setGenState((prev) => {
+        const existing = prev[categoryId];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [categoryId]: {
+            ...existing,
+            sessions: previous,
+          },
+        };
+      });
+      setCalendarError('Something went wrong. Please try again.');
+    } finally {
+      setMovingSession(false);
+    }
+  }
+
+  async function reassignSessionDay(session: Session, day: number) {
+    const categoryId = session.category_id;
+    const cat = genStateRef.current[categoryId];
+    if (!cat) return;
+
+    const previous = cat.sessions;
+    const planned_date = plannedDateForDay(weekStart, day);
+    const optimistic = previous.map((s) =>
+      s.id === session.id
+        ? { ...s, day_of_week: day, planned_date }
+        : s
+    );
+
+    setMovingSession(true);
+    setCalendarError(null);
+    setGenState((prev) => {
+      const existing = prev[categoryId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [categoryId]: {
+          ...existing,
+          sessions: optimistic,
+        },
+      };
+    });
+
+    try {
+      const res = await fetch(`/api/sessions/${session.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day_of_week: day }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGenState((prev) => {
+          const existing = prev[categoryId];
+          if (!existing) return prev;
+          return {
+            ...prev,
+            [categoryId]: {
+              ...existing,
+              sessions: previous,
+            },
+          };
+        });
+        setCalendarError(data.error ?? 'Failed to move session');
+        return;
+      }
+
+      const updated = data.session as Session;
+      setGenState((prev) => {
+        const existing = prev[categoryId];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [categoryId]: {
+            ...existing,
+            sessions: existing.sessions.map((s) =>
+              s.id === updated.id ? updated : s
+            ),
+          },
+        };
+      });
+    } catch {
+      setGenState((prev) => {
+        const existing = prev[categoryId];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [categoryId]: {
+            ...existing,
+            sessions: previous,
+          },
+        };
+      });
+      setCalendarError('Something went wrong. Please try again.');
+    } finally {
+      setMovingSession(false);
+    }
+  }
+
+  async function handleMoveToDay(sessionId: string, day: number) {
+    if (movingSession || resetting) return;
+
+    let session: Session | undefined;
+    for (const category of aiPlanCategories) {
+      const found = genStateRef.current[category.id]?.sessions.find(
+        (s) => s.id === sessionId
+      );
+      if (found) {
+        session = found;
+        break;
+      }
+    }
+    if (!session || session.day_of_week === day) return;
+
+    const categoryId = session.category_id;
+    const cat = genStateRef.current[categoryId];
+    if (!cat || cat.status !== 'done') return;
+
+    const sessions = sortSessionsByDay(cat.sessions);
+    const occupant = sessions.find(
+      (s) => s.day_of_week === day && s.id !== sessionId
+    );
+
+    if (occupant) {
+      await swapSessions(session, occupant);
+      return;
+    }
+
+    await reassignSessionDay(session, day);
+  }
+
+  async function restoreCategoryFromSnapshot(
+    categoryId: string,
+    previousSessions: Session[],
+    snapshot: Session[]
+  ): Promise<void> {
+    const prevIds = new Set(previousSessions.map((s) => s.id));
+    const snapIds = new Set(snapshot.map((s) => s.id));
+
+    for (const prev of previousSessions) {
+      if (snapIds.has(prev.id)) continue;
+      const res = await fetch(`/api/sessions/${prev.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(
+          (data as { error?: string }).error ?? 'Failed to remove session'
+        );
+      }
+    }
+
+    for (const snap of snapshot) {
+      if (prevIds.has(snap.id)) continue;
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weekId,
+          session: {
+            id: snap.id,
+            categoryId: snap.category_id,
+            day_of_week: snap.day_of_week,
+            title: snap.title,
+            planned_duration_min: snap.planned_duration_min,
+            sort_order: snap.sort_order,
+            description: snap.description,
+            session_type: snap.session_type,
+            zones: snap.zones,
+            blocks: snap.blocks,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to restore deleted session');
+      }
+    }
+
+    const sharedPrevious = previousSessions.filter((s) => snapIds.has(s.id));
+    const sharedSnapshot = snapshot.filter((s) => prevIds.has(s.id));
+
+    const prevDays = new Set(sharedPrevious.map((s) => s.day_of_week));
+    const snapDays = new Set(sharedSnapshot.map((s) => s.day_of_week));
+    const sameDaySet =
+      prevDays.size === snapDays.size &&
+      Array.from(prevDays).every((d) => snapDays.has(d));
+
+    if (sameDaySet && sharedPrevious.length >= 2) {
+      const slots = sortSessionsByDay(sharedPrevious);
+      const orderedIds = slots.map((slot) => {
+        const target = sharedSnapshot.find(
+          (s) => s.day_of_week === slot.day_of_week
+        );
+        return target?.id;
+      });
+      if (
+        orderedIds.every((id): id is string => Boolean(id)) &&
+        orderedIds.some((id, i) => id !== slots[i].id)
+      ) {
+        const res = await fetch('/api/sessions/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            weekId,
+            categoryId,
+            sessionIds: orderedIds,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error ?? 'Failed to restore session days');
+        }
+      }
+    } else {
+      for (const snap of sharedSnapshot) {
+        const prev = sharedPrevious.find((s) => s.id === snap.id);
+        if (!prev || prev.day_of_week === snap.day_of_week) continue;
+        const res = await fetch(`/api/sessions/${snap.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day_of_week: snap.day_of_week }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error ?? 'Failed to restore session day');
+        }
+      }
+    }
+
+    for (const snap of sharedSnapshot) {
+      const prev = sharedPrevious.find((s) => s.id === snap.id);
+      if (
+        prev &&
+        prev.title === snap.title &&
+        prev.planned_duration_min === snap.planned_duration_min
+      ) {
+        continue;
+      }
+
+      const body: {
+        title?: string;
+        planned_duration_min?: number | null;
+      } = {};
+      if (!prev || prev.title !== snap.title) {
+        body.title = snap.title;
+      }
+      if (
+        (!prev || prev.planned_duration_min !== snap.planned_duration_min) &&
+        (snap.planned_duration_min == null || snap.planned_duration_min > 0)
+      ) {
+        body.planned_duration_min = snap.planned_duration_min;
+      }
+      if (body.title === undefined && body.planned_duration_min === undefined) {
+        continue;
+      }
+
+      const res = await fetch(`/api/sessions/${snap.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to restore session details');
+      }
+    }
+  }
+
+  async function resetToSnapshots() {
+    if (resetting || movingSession || !hasCalendarChanges) return;
+
+    const previousByCategory: Record<string, Session[]> = {};
+    for (const category of aiPlanCategories) {
+      const state = genStateRef.current[category.id];
+      if (state?.status === 'done') {
+        previousByCategory[category.id] = cloneSessions(state.sessions);
+      }
+    }
+
+    setResetting(true);
+    setCalendarError(null);
+    setEditingSessionId(null);
+
+    setGenState((prev) => {
+      const next = { ...prev };
+      for (const category of aiPlanCategories) {
+        const snap = snapshotsRef.current[category.id];
+        const existing = next[category.id];
+        if (!snap || !existing) continue;
+        next[category.id] = {
+          ...existing,
+          sessions: cloneSessions(snap),
+        };
+      }
+      return next;
+    });
+
+    try {
+      for (const category of aiPlanCategories) {
+        const snap = snapshotsRef.current[category.id];
+        const previous = previousByCategory[category.id];
+        if (!snap || !previous) continue;
+        if (sessionsMatchSnapshot(previous, snap)) continue;
+        await restoreCategoryFromSnapshot(category.id, previous, snap);
+      }
+    } catch (err) {
+      setGenState((prev) => {
+        const next = { ...prev };
+        for (const [categoryId, sessions] of Object.entries(
+          previousByCategory
+        )) {
+          const existing = next[categoryId];
+          if (!existing) continue;
+          next[categoryId] = {
+            ...existing,
+            sessions,
+          };
+        }
+        return next;
+      });
+      setCalendarError(
+        err instanceof Error
+          ? err.message
+          : 'Something went wrong. Please try again.'
+      );
+    } finally {
+      setResetting(false);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <div>
@@ -424,18 +1002,159 @@ export function PlanGenerationStep({
           Step 3 — Generate Plans
         </p>
         <h2 className="mt-1 text-lg font-semibold text-white">
-          Generating plans…
+          {showCalendar ? 'Your week at a glance' : 'Generating plans…'}
         </h2>
         <p className="mt-2 text-sm text-gray-400">
-          AI coaches build each active category. Strength waits for Cycling so
-          hard days stay coordinated.
+          {showCalendar
+            ? 'Drag a session to another day. Regenerating a category returns to the progress cards until it finishes.'
+            : 'AI coaches build each active category. Strength waits for Cycling so hard days stay coordinated.'}
         </p>
       </div>
 
-      <ul className="space-y-3">
-        {orderedAiPlan.map((category) => {
-          const state = genState[category.id] ?? emptyState();
-          return (
+      {showCalendar ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <ul className="flex flex-wrap gap-x-4 gap-y-2">
+              {orderedAiPlan.map((category) => (
+                <li
+                  key={category.id}
+                  className="flex items-center gap-2 text-sm text-gray-300"
+                >
+                  <CategoryGlyph
+                    icon={category.icon}
+                    color={category.color}
+                    size={16}
+                    aria-label={`${category.name} icon`}
+                  />
+                  <span>{category.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => void generateCategory(category)}
+                    className="text-xs text-gray-400 underline underline-offset-2 hover:text-white"
+                  >
+                    Regenerate
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              disabled={!hasCalendarChanges || resetting || movingSession}
+              onClick={() => void resetToSnapshots()}
+              className="shrink-0 text-xs text-gray-400 underline underline-offset-2 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline"
+            >
+              {resetting ? 'Resetting…' : 'Reset'}
+            </button>
+          </div>
+
+          {calendarError && (
+            <p className="text-sm text-red-400" role="alert">
+              {calendarError}
+            </p>
+          )}
+
+          <WeekPlanCalendar
+            sessions={calendarSessions}
+            disabled={movingSession || resetting}
+            editingSessionId={editingSessionId}
+            editTitle={editTitle}
+            editDuration={editDuration}
+            editSaving={editSaving}
+            onEditTitleChange={setEditTitle}
+            onEditDurationChange={setEditDuration}
+            onStartEdit={(session) => {
+              setEditingSessionId(session.id);
+              setEditTitle(session.title);
+              setEditDuration(
+                session.planned_duration_min != null
+                  ? String(session.planned_duration_min)
+                  : ''
+              );
+            }}
+            onSaveEdit={(session) => void saveSessionEdit(session)}
+            onCancelEdit={() => setEditingSessionId(null)}
+            onMoveToDay={(sessionId, day) =>
+              void handleMoveToDay(sessionId, day)
+            }
+            onDeleteSession={(sessionId) =>
+              void handleDeleteSession(sessionId)
+            }
+          />
+        </>
+      ) : (
+        <ul className="space-y-3">
+          {orderedAiPlan.map((category) => {
+            const state = genState[category.id] ?? emptyState();
+            return (
+              <li
+                key={category.id}
+                className="rounded border border-gray-700 bg-gray-900 p-4"
+              >
+                <div className="flex items-start gap-3">
+                  <CategoryGlyph
+                    icon={category.icon}
+                    color={category.color}
+                    size={22}
+                    aria-label={`${category.name} icon`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-white">
+                        {category.name}
+                      </h3>
+                      {(state.status === 'generating' ||
+                        state.status === 'loading') && (
+                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                          <span
+                            className="h-3 w-3 animate-spin rounded-full border-2 border-gray-500 border-t-white"
+                            aria-hidden
+                          />
+                          {state.status === 'loading'
+                            ? 'Checking…'
+                            : 'Generating…'}
+                        </span>
+                      )}
+                      {state.status === 'done' && (
+                        <span className="text-xs text-gray-400">
+                          {state.sessions.length} session
+                          {state.sessions.length === 1 ? '' : 's'}
+                          {state.weekTheme ? ` · ${state.weekTheme}` : ''}
+                        </span>
+                      )}
+                    </div>
+
+                    {state.status === 'error' && (
+                      <p className="mt-2 text-sm text-red-400" role="alert">
+                        {state.error}
+                      </p>
+                    )}
+
+                    {state.status === 'idle' && (
+                      <button
+                        type="button"
+                        onClick={() => void generateCategory(category)}
+                        className="mt-3 text-xs text-white underline underline-offset-2 hover:text-gray-200"
+                      >
+                        Generate
+                      </button>
+                    )}
+
+                    {(state.status === 'done' || state.status === 'error') && (
+                      <button
+                        type="button"
+                        onClick={() => void generateCategory(category)}
+                        className="mt-3 text-xs text-gray-400 underline underline-offset-2 hover:text-white"
+                      >
+                        Regenerate
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+
+          {randomPickCategories.map((category) => (
             <li
               key={category.id}
               className="rounded border border-gray-700 bg-gray-900 p-4"
@@ -447,176 +1166,32 @@ export function PlanGenerationStep({
                   size={22}
                   aria-label={`${category.name} icon`}
                 />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-sm font-semibold text-white">
-                      {category.name}
-                    </h3>
-                    {(state.status === 'generating' ||
-                      state.status === 'loading') && (
-                      <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                        <span
-                          className="h-3 w-3 animate-spin rounded-full border-2 border-gray-500 border-t-white"
-                          aria-hidden
-                        />
-                        {state.status === 'loading'
-                          ? 'Checking…'
-                          : 'Generating…'}
-                      </span>
-                    )}
-                    {state.status === 'done' && state.weekTheme && (
-                      <span className="text-xs text-gray-400">
-                        {state.weekTheme}
-                      </span>
-                    )}
-                  </div>
-
-                  {state.status === 'error' && (
-                    <p className="mt-2 text-sm text-red-400" role="alert">
-                      {state.error}
-                    </p>
-                  )}
-
-                  {state.status === 'done' && (
-                    <ul className="mt-3 space-y-1.5">
-                      {state.sessions.map((session) => {
-                        const editing = editingSessionId === session.id;
-                        return (
-                          <li
-                            key={session.id}
-                            className="flex items-center gap-2 text-sm text-gray-300"
-                          >
-                            <span className="w-8 shrink-0 text-xs font-medium uppercase text-gray-500">
-                              {dayLabel(session.day_of_week)}
-                            </span>
-                            {editing ? (
-                              <>
-                                <input
-                                  type="text"
-                                  value={editTitle}
-                                  onChange={(e) => setEditTitle(e.target.value)}
-                                  className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-950 px-2 py-1 text-sm text-white outline-none focus:border-gray-400"
-                                  aria-label="Session title"
-                                />
-                                <input
-                                  type="number"
-                                  min={1}
-                                  value={editDuration}
-                                  onChange={(e) =>
-                                    setEditDuration(e.target.value)
-                                  }
-                                  className="w-16 rounded border border-gray-600 bg-gray-950 px-2 py-1 text-sm text-white outline-none focus:border-gray-400"
-                                  aria-label="Duration minutes"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={editSaving}
-                                  onClick={() =>
-                                    void saveSessionEdit(session, category.id)
-                                  }
-                                  className="text-xs text-white underline underline-offset-2 disabled:opacity-50"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingSessionId(null)}
-                                  className="text-xs text-gray-400 underline underline-offset-2"
-                                >
-                                  Cancel
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingSessionId(session.id);
-                                    setEditTitle(session.title);
-                                    setEditDuration(
-                                      session.planned_duration_min != null
-                                        ? String(session.planned_duration_min)
-                                        : ''
-                                    );
-                                  }}
-                                  className="min-w-0 flex-1 truncate text-left hover:text-white"
-                                >
-                                  {session.title}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingSessionId(session.id);
-                                    setEditTitle(session.title);
-                                    setEditDuration(
-                                      session.planned_duration_min != null
-                                        ? String(session.planned_duration_min)
-                                        : ''
-                                    );
-                                  }}
-                                  className="shrink-0 text-xs text-gray-400 hover:text-white"
-                                >
-                                  {session.planned_duration_min != null
-                                    ? `${session.planned_duration_min} min`
-                                    : '—'}
-                                </button>
-                              </>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-
-                  {state.status === 'idle' && (
-                    <button
-                      type="button"
-                      onClick={() => void generateCategory(category)}
-                      className="mt-3 text-xs text-white underline underline-offset-2 hover:text-gray-200"
-                    >
-                      Generate
-                    </button>
-                  )}
-
-                  {(state.status === 'done' || state.status === 'error') && (
-                    <button
-                      type="button"
-                      onClick={() => void generateCategory(category)}
-                      className="mt-3 text-xs text-gray-400 underline underline-offset-2 hover:text-white"
-                    >
-                      Regenerate
-                    </button>
-                  )}
+                <div>
+                  <h3 className="text-sm font-semibold text-white">
+                    {category.name}
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Will be generated after you confirm your training plan
+                  </p>
                 </div>
               </div>
             </li>
-          );
-        })}
+          ))}
+        </ul>
+      )}
 
-        {randomPickCategories.map((category) => (
-          <li
-            key={category.id}
-            className="rounded border border-gray-700 bg-gray-900 p-4"
-          >
-            <div className="flex items-start gap-3">
-              <CategoryGlyph
-                icon={category.icon}
-                color={category.color}
-                size={22}
-                aria-label={`${category.name} icon`}
-              />
-              <div>
-                <h3 className="text-sm font-semibold text-white">
-                  {category.name}
-                </h3>
-                <p className="mt-1 text-sm text-gray-400">
-                  Will be generated after you confirm your training plan
-                </p>
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {showCalendar && randomPickCategories.length > 0 && (
+        <ul className="space-y-2">
+          {randomPickCategories.map((category) => (
+            <li
+              key={category.id}
+              className="rounded border border-gray-800 bg-gray-900/50 px-3 py-2 text-sm text-gray-400"
+            >
+              {category.name}: will be generated after you confirm
+            </li>
+          ))}
+        </ul>
+      )}
 
       {orderedAiPlan.length === 0 && randomPickCategories.length === 0 && (
         <p className="text-sm text-gray-500">
@@ -632,6 +1207,16 @@ export function PlanGenerationStep({
       >
         {allAiDone ? continueLabel : 'Waiting for plans…'}
       </button>
+
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="w-full rounded border border-gray-700 px-4 py-2.5 text-sm text-gray-300 hover:border-gray-500"
+        >
+          Back
+        </button>
+      )}
     </section>
   );
 }
