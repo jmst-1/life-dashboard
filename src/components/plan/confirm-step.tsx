@@ -8,6 +8,7 @@ import {
   WeekPlanCalendar,
   type CalendarSession,
 } from '@/components/plan/week-plan-calendar';
+import { isRestSession } from '@/lib/session-utils';
 import type { Category, NutritionPlan, Session } from '@/types';
 
 type ConfirmStepProps = {
@@ -18,11 +19,6 @@ type ConfirmStepProps = {
   weightKgSnapshot: number | null;
   onBack?: () => void;
 };
-
-function isRestSession(session: Session): boolean {
-  if (session.planned_duration_min === 0) return true;
-  return /^\s*rest(\s+day)?\s*$/i.test(session.title);
-}
 
 function plannedMinutes(sessions: Session[]): number {
   return sessions.reduce(

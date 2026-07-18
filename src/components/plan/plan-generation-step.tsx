@@ -8,6 +8,7 @@ import {
   type CalendarSession,
 } from '@/components/plan/week-plan-calendar';
 import { dayLabel, plannedDateForDay } from '@/lib/plan-context';
+import { isRestSession } from '@/lib/session-utils';
 import { createClient } from '@/lib/supabase/client';
 import type { Category, Session } from '@/types';
 
@@ -90,11 +91,6 @@ function sortSessionsByDay(sessions: Session[]): Session[] {
     }
     return a.sort_order - b.sort_order;
   });
-}
-
-function isRestSession(session: Session): boolean {
-  if (session.planned_duration_min === 0) return true;
-  return /^\s*rest(\s+day)?\s*$/i.test(session.title);
 }
 
 function cloneSessions(sessions: Session[]): Session[] {

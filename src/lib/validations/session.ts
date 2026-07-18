@@ -59,3 +59,32 @@ export const createSessionSchema = z.object({
 });
 
 export type CreateSessionBody = z.infer<typeof createSessionSchema>;
+
+const exerciseLogSetSchema = z.object({
+  set_num: z.number().int().positive(),
+  reps: z.number().int().nonnegative().nullable(),
+  weight_kg: z.number().nonnegative().nullable(),
+  equipment: z.string().nullable(),
+  notes: z.string().nullable(),
+});
+
+const exerciseLogEntrySchema = z.object({
+  exercise_name: z.string().min(1),
+  sets: z.array(exerciseLogSetSchema),
+});
+
+export const completeSessionSchema = z
+  .object({
+    actual_duration_min: z.number().int().nonnegative(),
+    completed: z.boolean(),
+    skipped: z.boolean(),
+    actual_calories_kcal: z.number().int().nonnegative().nullable().optional(),
+    execution_notes: z.string().nullable().optional(),
+    skip_reason: z.string().nullable().optional(),
+    exercise_log: z.array(exerciseLogEntrySchema).optional(),
+  })
+  .refine((data) => !(data.completed && data.skipped), {
+    message: 'completed and skipped cannot both be true',
+  });
+
+export type CompleteSessionBody = z.infer<typeof completeSessionSchema>;

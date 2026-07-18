@@ -1,3 +1,5 @@
+'use client';
+
 import { dayLabel } from '@/lib/plan-context';
 import type { DayType, NutritionPlan } from '@/types';
 
@@ -23,6 +25,7 @@ type NutritionCardProps = {
   onRecalculate?: () => void;
 };
 
+/** Plan-wizard nutrition card (always expanded). Week view uses WeekBoard + WeekDayMacros. */
 export function NutritionCard({
   plan,
   showActions = false,

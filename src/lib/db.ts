@@ -4,6 +4,7 @@ import { plannedDateForDay } from '@/lib/plan-context';
 import type {
   Category,
   CyclingZone,
+  ExerciseLogEntry,
   MovementLibraryEntry,
   NutritionPlan,
   Profile,
@@ -527,6 +528,14 @@ export type UpdateSessionInput = {
   planned_date?: string | null;
   routine_steps?: RoutineStep[] | null;
   library_entry_id?: string | null;
+  completed?: boolean;
+  skipped?: boolean;
+  skip_reason?: string | null;
+  actual_duration_min?: number | null;
+  actual_calories_kcal?: number | null;
+  execution_notes?: string | null;
+  completed_at?: string | null;
+  exercise_log?: ExerciseLogEntry[] | null;
 };
 
 export async function getActiveMovementLibrary(
