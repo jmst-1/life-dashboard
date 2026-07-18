@@ -4,8 +4,10 @@ import { FormEvent, useState } from 'react';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { CategoryGlyph } from '@/components/categories/category-glyph';
+import { ConfirmStep } from '@/components/plan/confirm-step';
+import { NutritionStep } from '@/components/plan/nutrition-step';
 import { PlanGenerationStep } from '@/components/plan/plan-generation-step';
-import type { Category, Week } from '@/types';
+import type { Category, NutritionPlan, Week } from '@/types';
 
 const inputClassName =
   'mt-1 w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none focus:border-gray-500';
@@ -41,6 +43,16 @@ export function PlanningWizard({
   const [weighInError, setWeighInError] = useState<string | null>(null);
   const [nextLoading, setNextLoading] = useState(false);
   const [nextError, setNextError] = useState<string | null>(null);
+  const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(
+    null
+  );
+
+  const selectedCategories = categories.filter(
+    (c) => selectedCategoryIds[c.id] !== false
+  );
+  const hasNutritionCategories = selectedCategories.some(
+    (c) => c.affects_nutrition
+  );
 
   function toggleCategory(id: string) {
     setSelectedCategoryIds((prev) => ({
@@ -102,6 +114,14 @@ export function PlanningWizard({
       setNextError('Something went wrong. Please try again.');
     } finally {
       setNextLoading(false);
+    }
+  }
+
+  function handleAfterPlans() {
+    if (hasNutritionCategories) {
+      setStep(3);
+    } else {
+      setStep(4);
     }
   }
 
@@ -281,16 +301,40 @@ export function PlanningWizard({
       planningNotes={planningNotes}
       categories={categories}
       selectedCategoryIds={selectedCategoryIds}
+      onContinue={handleAfterPlans}
+      continueLabel={
+        hasNutritionCategories ? 'Next: Nutrition' : 'Next: Confirm'
+      }
+    />
+  );
+
+  const step4 = (
+    <NutritionStep
+      weekId={week.id}
+      onContinue={() => setStep(4)}
+      onPlanReady={setNutritionPlan}
+    />
+  );
+
+  const step5 = (
+    <ConfirmStep
+      weekId={week.id}
+      categories={categories}
+      selectedCategoryIds={selectedCategoryIds}
+      nutritionPlan={nutritionPlan}
+      weightKgSnapshot={displayWeight}
     />
   );
 
   return (
     <div className="space-y-10">
-      {/* Desktop: all completed steps visible; Step 3 only after advance */}
+      {/* Desktop: earlier steps stay visible; later steps appear as you advance */}
       <div className="hidden space-y-10 md:block">
         {step1}
         {step2}
         {step >= 2 && step3}
+        {step >= 3 && hasNutritionCategories && step4}
+        {step >= 4 && step5}
       </div>
 
       {/* Mobile: one step at a time */}
@@ -319,7 +363,9 @@ export function PlanningWizard({
             </button>
           </div>
         )}
-        {step >= 2 && step3}
+        {step === 2 && step3}
+        {step === 3 && hasNutritionCategories && step4}
+        {step === 4 && step5}
       </div>
     </div>
   );

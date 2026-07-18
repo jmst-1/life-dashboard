@@ -31,12 +31,17 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  const updates: Partial<Pick<Week, 'planning_notes' | 'status'>> = {};
+  const updates: Partial<
+    Pick<Week, 'planning_notes' | 'status' | 'weight_kg_snapshot'>
+  > = {};
   if (parsed.data.planning_notes !== undefined) {
     updates.planning_notes = parsed.data.planning_notes;
   }
   if (parsed.data.status !== undefined) {
     updates.status = parsed.data.status;
+  }
+  if (parsed.data.weight_kg_snapshot !== undefined) {
+    updates.weight_kg_snapshot = parsed.data.weight_kg_snapshot;
   }
 
   const { data, error } = await supabase

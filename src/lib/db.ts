@@ -4,6 +4,7 @@ import { plannedDateForDay } from '@/lib/plan-context';
 import type {
   Category,
   CyclingZone,
+  NutritionPlan,
   Profile,
   Session,
   SessionRenderer,
@@ -546,4 +547,92 @@ export async function updateSession(
   }
 
   return { session: data as Session, error: null };
+}
+
+export async function getNutritionPlanByWeek(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string
+): Promise<NutritionPlan | null> {
+  const { data, error } = await supabase
+    .from('nutrition_plans')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('week_id', weekId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('getNutritionPlanByWeek error:', error);
+    return null;
+  }
+
+  return data as NutritionPlan | null;
+}
+
+export type UpsertNutritionPlanInput = {
+  week_id: string;
+  weight_kg: number;
+  goal_weight_kg: number | null;
+  deficit_strategy: string;
+  baseline_tdee: number;
+  weekly_deficit_target: number;
+  race_week: boolean;
+  training_calories_map: Record<string, number>;
+  macro_guide: NutritionPlan['macro_guide'];
+  meal_prep_brief: string;
+};
+
+export async function upsertNutritionPlan(
+  supabase: SupabaseClient,
+  userId: string,
+  input: UpsertNutritionPlanInput
+): Promise<{ nutritionPlan: NutritionPlan | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('nutrition_plans')
+    .upsert(
+      {
+        ...input,
+        user_id: userId,
+        generated_at: new Date().toISOString(),
+      },
+      { onConflict: 'week_id,user_id' }
+    )
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('upsertNutritionPlan error:', error);
+    return { nutritionPlan: null, error: error.message };
+  }
+
+  return { nutritionPlan: data as NutritionPlan, error: null };
+}
+
+export async function updateNutritionPlanBrief(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string,
+  mealPrepBrief: string
+): Promise<{ nutritionPlan: NutritionPlan | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('nutrition_plans')
+    .update({
+      meal_prep_brief: mealPrepBrief,
+      generated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+    .eq('week_id', weekId)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    console.error('updateNutritionPlanBrief error:', error);
+    return { nutritionPlan: null, error: error.message };
+  }
+
+  if (!data) {
+    return { nutritionPlan: null, error: 'Nutrition plan not found' };
+  }
+
+  return { nutritionPlan: data as NutritionPlan, error: null };
 }

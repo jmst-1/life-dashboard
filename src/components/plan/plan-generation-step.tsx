@@ -32,6 +32,8 @@ type PlanGenerationStepProps = {
   planningNotes: string;
   categories: Category[];
   selectedCategoryIds: Record<string, boolean>;
+  onContinue: () => void;
+  continueLabel?: string;
 };
 
 function emptyState(): CategoryGenState {
@@ -49,6 +51,8 @@ export function PlanGenerationStep({
   planningNotes,
   categories,
   selectedCategoryIds,
+  onContinue,
+  continueLabel = 'Next: Nutrition',
 }: PlanGenerationStepProps) {
   const selected = categories.filter(
     (c) => selectedCategoryIds[c.id] !== false
@@ -623,15 +627,11 @@ export function PlanGenerationStep({
       <button
         type="button"
         disabled={!allAiDone}
+        onClick={onContinue}
         className="w-full rounded bg-white px-4 py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {allAiDone ? 'Next: Nutrition' : 'Waiting for plans…'}
+        {allAiDone ? continueLabel : 'Waiting for plans…'}
       </button>
-      {allAiDone && (
-        <p className="text-center text-xs text-gray-500">
-          Nutrition step comes in the next session.
-        </p>
-      )}
     </section>
   );
 }
