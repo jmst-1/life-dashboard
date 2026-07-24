@@ -48,6 +48,18 @@ select {
   font-size: 16px;
 }
 
+@keyframes ld-stride {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
@@ -61,5 +73,14 @@ select {
   }
   .scrollbar-none::-webkit-scrollbar {
     display: none;
+  }
+  .ld-stride-dot {
+    animation: ld-stride 0.9s ease-in-out infinite;
+  }
+  .ld-stride-dot-2 {
+    animation-delay: 0.15s;
+  }
+  .ld-stride-dot-3 {
+    animation-delay: 0.3s;
   }
 }

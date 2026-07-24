@@ -123,21 +123,23 @@ export function CategoryList({
                   )}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setEditingCategory(category)}
-                className="text-[11px] text-ld-text-sub"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                disabled={archivingId === category.id}
-                onClick={() => handleArchive(category.id)}
-                className="text-[11px] text-ld-red disabled:opacity-50"
-              >
-                Archive
-              </button>
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setEditingCategory(category)}
+                  className="rounded-lg border border-ld-border bg-ld-surface px-3 py-1.5 text-[11px] font-bold text-ld-text"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  disabled={archivingId === category.id}
+                  onClick={() => handleArchive(category.id)}
+                  className="rounded-lg border border-ld-border bg-ld-surface px-3 py-1.5 text-[11px] font-bold text-ld-red disabled:opacity-50"
+                >
+                  Archive
+                </button>
+              </div>
             </li>
           );
         })}

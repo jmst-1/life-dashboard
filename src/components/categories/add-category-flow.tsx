@@ -151,7 +151,7 @@ export function AddCategoryFlow({
           className="absolute inset-0 bg-black/80 backdrop-blur-[6px]"
           onClick={handleClose}
         />
-        <div className="relative z-[1] max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] border border-b-0 border-ld-border bg-ld-surface px-5 pb-12 pt-3">
+        <div className="relative z-[1] max-h-[66.666vh] w-full overflow-y-auto rounded-t-[22px] border border-b-0 border-ld-border bg-ld-surface px-5 pb-12 pt-3">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-[17px] font-extrabold text-ld-text">
             Add category
@@ -219,7 +219,7 @@ export function AddCategoryFlow({
             <button
               type="button"
               onClick={selectCustom}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-ld-border p-3 text-[13px] text-ld-text-sub"
+              className="w-full rounded-[14px] border border-ld-border bg-ld-surface-high px-4 py-3 text-sm font-bold text-ld-text"
             >
               Build your own
             </button>

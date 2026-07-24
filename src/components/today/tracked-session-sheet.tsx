@@ -116,7 +116,7 @@ export function TrackedSessionSheet({
   }
 
   return (
-    <Sheet onClose={onClose} maxH="96vh">
+    <Sheet onClose={onClose}>
       <div className="pt-1">
         <div className="mb-4 flex items-center gap-3">
           <div

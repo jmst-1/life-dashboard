@@ -9,7 +9,7 @@ type SheetProps = {
 };
 
 /** Bottom sheet constrained to the phone app frame (max-w-phone), not the full viewport. */
-export function Sheet({ onClose, children, maxH = '92vh' }: SheetProps) {
+export function Sheet({ onClose, children, maxH = '66.666vh' }: SheetProps) {
   return (
     <div className="fixed inset-0 z-[200] flex justify-center">
       <div className="relative flex h-full w-full max-w-phone flex-col justify-end">

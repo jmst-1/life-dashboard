@@ -130,7 +130,7 @@ export function CategoryCreateSheet({
   }
 
   return (
-    <Sheet onClose={onClose} maxH="96vh">
+    <Sheet onClose={onClose}>
       <div className="mb-1.5 flex items-center justify-between pt-1">
         <div className="text-[17px] font-extrabold text-ld-text">
           {isRealEdit ? 'Edit category' : 'New category'}
