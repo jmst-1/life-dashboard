@@ -1,4 +1,6 @@
+import { AppHeader } from '@/components/layout/app-header';
 import { BottomNav } from '@/components/layout/bottom-nav';
+import { HeaderProvider } from '@/components/layout/header-context';
 
 export default function AppLayout({
   children,
@@ -6,9 +8,12 @@ export default function AppLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-950">
-      <main className="pb-16">{children}</main>
-      <BottomNav />
-    </div>
+    <HeaderProvider>
+      <div className="min-h-screen bg-ld-bg">
+        <AppHeader />
+        <main className="mx-auto min-h-screen max-w-phone pb-20">{children}</main>
+        <BottomNav />
+      </div>
+    </HeaderProvider>
   );
 }

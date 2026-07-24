@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { SetHeader } from '@/components/layout/header-context';
 import { StrengthCoachForm } from '@/components/settings/strength-coach-form';
 import { getCategories } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
@@ -18,35 +19,27 @@ export default async function StrengthCoachPage() {
   const strength = categories.find((c) => c.name === 'Strength');
 
   return (
-    <div className="min-h-screen bg-gray-950 px-4 py-8 pb-24 text-white">
-      <div className="mx-auto max-w-md">
-        <Link
-          href="/settings"
-          className="text-sm text-gray-400 hover:text-white"
-        >
-          ← Settings
-        </Link>
-        <h1 className="mt-4 text-xl font-semibold">Strength Coach</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Context used when generating your weekly strength plan.
-        </p>
+    <div className="px-5 pb-8 pt-4 text-ld-text">
+      <SetHeader title="Strength Coach" backHref="/settings" />
+      <p className="text-[13px] text-ld-text-sub">
+        Context used when generating your weekly strength plan.
+      </p>
 
-        <div className="mt-8">
-          {strength ? (
-            <StrengthCoachForm category={strength} />
-          ) : (
-            <p className="text-sm text-gray-400">
-              No Strength category found — add one in{' '}
-              <Link
-                href="/settings/categories"
-                className="text-white underline hover:text-gray-200"
-              >
-                Settings → Categories
-              </Link>
-              .
-            </p>
-          )}
-        </div>
+      <div className="mt-6">
+        {strength ? (
+          <StrengthCoachForm category={strength} />
+        ) : (
+          <p className="text-sm text-ld-text-sub">
+            No Strength category found — add one in{' '}
+            <Link
+              href="/settings/categories"
+              className="font-semibold text-ld-orange hover:underline"
+            >
+              Settings → Categories
+            </Link>
+            .
+          </p>
+        )}
       </div>
     </div>
   );

@@ -1,12 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Category } from '@/types';
-import { formatTrackingType } from '@/lib/category-templates';
+import {
+  effortLabel,
+  getCategoryMode,
+  getEffortType,
+  modeLabel,
+} from '@/lib/category-mode';
 import { AddCategoryFlow } from './add-category-flow';
+import {
+  CategoryCreateSheet,
+  type CategoryCreatePayload,
+} from './category-create-sheet';
 import { CategoryGlyph } from './category-glyph';
+import { Pill } from '@/components/ui/pill';
 
 type CategoryListProps = {
   active: Category[];
@@ -21,6 +30,8 @@ export function CategoryList({
 }: CategoryListProps) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,89 +58,108 @@ export function CategoryList({
     }
   }
 
-  return (
-    <div>
-      {error && (
-        <p className="mb-4 text-sm text-red-400" role="alert">
-          {error}
-        </p>
-      )}
+  async function handleEditSave(payload: CategoryCreatePayload) {
+    if (!editingCategory) return;
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/categories/${editingCategory.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to update category');
+      }
+      setEditingCategory(null);
+      router.refresh();
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
-      {active.length === 0 ? (
-        <p className="rounded border border-gray-800 bg-gray-900/50 px-4 py-6 text-center text-sm text-gray-400">
-          No categories yet — add your first one below.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {active.map((category) => (
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-ld-text">Active</h2>
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          className="rounded-xl bg-ld-orange px-3 py-1.5 text-xs font-bold text-white"
+        >
+          Add category
+        </button>
+      </div>
+
+      {error && <p className="text-sm text-ld-red">{error}</p>}
+
+      <ul className="space-y-2">
+        {active.map((category) => {
+          const mode = getCategoryMode(category);
+          const effort = getEffortType(category);
+          return (
             <li
               key={category.id}
-              className="flex items-center gap-3 rounded border border-gray-700 bg-gray-900 px-4 py-3"
+              className="flex items-center gap-3 rounded-[14px] border border-ld-border bg-ld-surface px-4 py-3"
             >
               <CategoryGlyph
                 icon={category.icon}
                 color={category.color}
-                size={22}
-                aria-label={`${category.name} icon`}
+                size={18}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-white">
+                <div className="text-sm font-bold text-ld-text">
                   {category.name}
-                </p>
-                <span className="mt-0.5 inline-block rounded border border-gray-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">
-                  {formatTrackingType(category.tracking_type)}
-                </span>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  <Pill label={modeLabel(mode)} color={category.color} />
+                  <Pill label={effortLabel(effort)} color="var(--ld-text-sub)" />
+                  {category.affects_nutrition && (
+                    <Pill label="Nutrition" color="var(--ld-orange)" />
+                  )}
+                  {category.timed_session && (
+                    <Pill label="Timed" color="var(--ld-teal)" />
+                  )}
+                </div>
               </div>
-              <Link
-                href={`/settings/categories/${category.id}`}
-                className="rounded border border-gray-700 px-2.5 py-1.5 text-xs text-gray-300 hover:border-gray-500 hover:text-white"
+              <button
+                type="button"
+                onClick={() => setEditingCategory(category)}
+                className="text-[11px] text-ld-text-sub"
               >
                 Edit
-              </Link>
+              </button>
               <button
                 type="button"
                 disabled={archivingId === category.id}
                 onClick={() => handleArchive(category.id)}
-                className="rounded border border-gray-700 px-2.5 py-1.5 text-xs text-gray-400 hover:border-red-800 hover:text-red-400 disabled:opacity-50"
+                className="text-[11px] text-ld-red disabled:opacity-50"
               >
-                {archivingId === category.id ? '…' : 'Archive'}
+                Archive
               </button>
             </li>
-          ))}
-        </ul>
-      )}
-
-      <button
-        type="button"
-        onClick={() => setAddOpen(true)}
-        className="mt-6 w-full rounded bg-white px-3 py-2 text-sm font-medium text-gray-950 hover:bg-gray-200"
-      >
-        Add category
-      </button>
+          );
+        })}
+      </ul>
 
       {archived.length > 0 && (
-        <div className="mt-10">
-          <h2 className="text-sm font-medium text-gray-400">Archived</h2>
-          <ul className="mt-3 space-y-2">
+        <div>
+          <h2 className="mb-2 text-sm font-semibold text-ld-text-muted">
+            Archived
+          </h2>
+          <ul className="space-y-2 opacity-60">
             {archived.map((category) => (
               <li
                 key={category.id}
-                className="flex items-center gap-3 rounded border border-gray-800 bg-gray-900/40 px-4 py-3 opacity-60"
+                className="flex items-center gap-3 rounded-[14px] border border-ld-border px-4 py-3"
               >
                 <CategoryGlyph
                   icon={category.icon}
                   color={category.color}
-                  size={22}
-                  aria-label={`${category.name} icon`}
+                  size={18}
                 />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-gray-400">
-                    {category.name}
-                  </p>
-                  <span className="mt-0.5 inline-block rounded border border-gray-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-500">
-                    {formatTrackingType(category.tracking_type)}
-                  </span>
-                </div>
+                <span className="text-sm text-ld-text-sub">{category.name}</span>
               </li>
             ))}
           </ul>
@@ -140,7 +170,17 @@ export function CategoryList({
         allowCustomCategories={allowCustomCategories}
         open={addOpen}
         onClose={() => setAddOpen(false)}
+        activeCount={active.length}
       />
+
+      {editingCategory && (
+        <CategoryCreateSheet
+          editing={editingCategory}
+          saving={savingEdit}
+          onClose={() => setEditingCategory(null)}
+          onSave={handleEditSave}
+        />
+      )}
     </div>
   );
 }

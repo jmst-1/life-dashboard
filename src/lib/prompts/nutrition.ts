@@ -9,6 +9,11 @@ export type MealPrepPromptContext = {
   planningNotes: string | null;
 };
 
+export type MealPrepClaudeResponse = {
+  summary: string;
+  brief: string;
+};
+
 function countDaysOfType(dayMap: Record<number, DayType>, type: DayType): number {
   return Object.values(dayMap).filter((t) => t === type).length;
 }
@@ -61,9 +66,19 @@ THIS WEEK CONTEXT:
 ${ctx.planningNotes?.trim() || 'None'}
 
 INSTRUCTIONS:
-Write a Sunday batch-cook brief (250–400 words). Suggest 2–3 protein bases and
+Return JSON only, no preamble, no markdown fences. Shape:
+{
+  "summary": "string",
+  "brief": "string"
+}
+
+summary: At most 2 sentences. Name the protein bases and carb bases, and how
+portioning differs on hard vs rest days. No fluff.
+
+brief: A Sunday batch-cook plan (250–400 words). Suggest 2–3 protein bases and
 1–2 carb bases, and explain how to portion the SAME base ingredients differently
 across hard/moderate/rest days — protein portion stays constant, carb portion
 scales with the day. Be specific about quantities. Practical, no fluff, assume
-a standard home kitchen. Output plain text only, no markdown, no bullet symbols.`;
+a standard home kitchen. Plain text inside the JSON string — no markdown, no
+bullet symbols.`;
 }

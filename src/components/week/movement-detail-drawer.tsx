@@ -43,10 +43,18 @@ export function MovementDetailDrawer({
   const [shuffling, setShuffling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const canLog = canEdit && !session.completed && !session.skipped;
+
   useEffect(() => {
     setSession(initialSession);
     setTargetArea(initialTargetArea);
-    setDuration(String(initialSession.planned_duration_min ?? 0));
+    setDuration(
+      String(
+        initialSession.actual_duration_min ??
+          initialSession.planned_duration_min ??
+          0
+      )
+    );
     setChecked({});
   }, [initialSession, initialTargetArea]);
 
@@ -55,6 +63,7 @@ export function MovementDetailDrawer({
   );
 
   async function handleShuffle() {
+    if (!canLog) return;
     setShuffling(true);
     setError(null);
     try {
@@ -86,8 +95,16 @@ export function MovementDetailDrawer({
   }
 
   async function handleLog() {
+    if (!canLog) return;
     setSaving(true);
     setError(null);
+
+    if (steps.length > 0 && !steps.some((step) => checked[step.order])) {
+      setError('Check at least one step before logging');
+      setSaving(false);
+      return;
+    }
+
     const durationNum = Number(duration);
     if (Number.isNaN(durationNum) || durationNum < 0) {
       setError('Duration must be a non-negative number');
@@ -148,10 +165,20 @@ export function MovementDetailDrawer({
                   {session.planned_duration_min} min
                 </span>
               )}
+              {session.completed && (
+                <span className="rounded border border-emerald-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-300">
+                  Completed
+                </span>
+              )}
+              {session.skipped && (
+                <span className="rounded border border-gray-600 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                  Skipped
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {canEdit && (
+            {canLog && (
               <button
                 type="button"
                 onClick={handleShuffle}
@@ -181,13 +208,14 @@ export function MovementDetailDrawer({
               <input
                 type="checkbox"
                 checked={!!checked[step.order]}
+                disabled={!canLog}
                 onChange={(e) =>
                   setChecked((prev) => ({
                     ...prev,
                     [step.order]: e.target.checked,
                   }))
                 }
-                className="mt-1 rounded border-gray-600"
+                className="mt-1 rounded border-gray-600 disabled:opacity-60"
               />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-white">
@@ -206,7 +234,7 @@ export function MovementDetailDrawer({
           ))}
         </ul>
 
-        {canEdit && (
+        {canLog && (
           <div className="mt-5 space-y-3 border-t border-gray-800 pt-4">
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-gray-400">
@@ -235,6 +263,12 @@ export function MovementDetailDrawer({
               {saving ? 'Saving…' : 'Log session'}
             </button>
           </div>
+        )}
+
+        {!canLog && session.actual_duration_min != null && (
+          <p className="mt-5 border-t border-gray-800 pt-4 text-sm text-gray-400">
+            Logged duration: {session.actual_duration_min} min
+          </p>
         )}
       </div>
     </div>

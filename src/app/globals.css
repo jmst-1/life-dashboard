@@ -3,25 +3,63 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* v6 design tokens (from life-dashboard-v6.jsx) */
+  --ld-bg: #080810;
+  --ld-surface: #0f0f1a;
+  --ld-surface-high: #161625;
+  --ld-surface-pop: #1c1c2e;
+  --ld-border: #1e1e32;
+  --ld-border-bright: #2c2c48;
+  --ld-text: #eeeef8;
+  --ld-text-sub: #7878a0;
+  --ld-text-muted: #3e3e60;
+  --ld-orange: #f07820;
+  --ld-orange-dim: #3d1f08;
+  --ld-orange-mid: #7a3d10;
+  --ld-purple: #8b7fe8;
+  --ld-purple-dim: #251e5a;
+  --ld-teal: #28c4c4;
+  --ld-teal-dim: #0d3d3d;
+  --ld-green: #22c55e;
+  --ld-green-dim: #0d2a1a;
+  --ld-red: #ef4444;
+  --ld-red-dim: #2a0d0d;
+  --ld-amber: #f59e0b;
+  --ld-amber-dim: #2a1f05;
+  --ld-blue: #60a5fa;
+  --ld-blue-dim: #0d1f3d;
+  --ld-pink: #f472b6;
+  --ld-pink-dim: #3d0f24;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: var(--ld-bg);
+  --foreground: var(--ld-text);
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Prevent iOS Safari zoom-on-focus (requires >= 16px). */
+input,
+textarea,
+select {
+  font-size: 16px;
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 }

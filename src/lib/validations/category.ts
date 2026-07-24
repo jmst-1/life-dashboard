@@ -3,10 +3,20 @@ import { z } from 'zod';
 const trackingTypeSchema = z.enum([
   'ai_plan',
   'random_pick',
+  'tracked',
   'session',
   'log_only',
   'count',
 ]);
+
+const modeSchema = z.enum(['ai', 'seeded', 'tracked']);
+const effortTypeSchema = z.enum(['rpe', 'duration', 'binary']);
+
+const taskTemplateItemSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  duration: z.string(),
+});
 
 const coachContextSchema = z
   .object({
@@ -19,7 +29,13 @@ export const createCategorySchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   icon: z.string().trim().min(1, 'Icon is required'),
   color: z.string().trim().min(1, 'Color is required'),
+  color_dim: z.string().trim().nullable().optional(),
   tracking_type: trackingTypeSchema,
+  mode: modeSchema.optional(),
+  effort_type: effortTypeSchema.optional(),
+  sessions_per_week: z.number().int().min(1).max(7).optional(),
+  timed_session: z.boolean().optional(),
+  task_template: z.array(taskTemplateItemSchema).optional(),
   ai_enabled: z.boolean(),
   affects_nutrition: z.boolean(),
   nutrition_met: z.number().positive('MET must be a positive number'),
@@ -36,6 +52,13 @@ export const updateCategorySchema = z.object({
   name: z.string().trim().min(1, 'Name is required').optional(),
   icon: z.string().trim().min(1, 'Icon is required').optional(),
   color: z.string().trim().min(1, 'Color is required').optional(),
+  color_dim: z.string().trim().nullable().optional(),
+  tracking_type: trackingTypeSchema.optional(),
+  mode: modeSchema.nullable().optional(),
+  effort_type: effortTypeSchema.optional(),
+  sessions_per_week: z.number().int().min(1).max(7).optional(),
+  timed_session: z.boolean().optional(),
+  task_template: z.array(taskTemplateItemSchema).optional(),
   ai_enabled: z.boolean().optional(),
   affects_nutrition: z.boolean().optional(),
   nutrition_met: z

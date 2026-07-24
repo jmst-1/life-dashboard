@@ -1,3 +1,5 @@
-export default function HistoryPage() {
-  return null;
+import { redirect } from 'next/navigation';
+
+export default function HistoryRedirect() {
+  redirect('/log');
 }

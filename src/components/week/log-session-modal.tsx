@@ -5,20 +5,27 @@ import type { Session } from '@/types';
 
 type LogSessionModalProps = {
   session: Session;
+  canEdit?: boolean;
   onClose: () => void;
   onSaved: (session: Session) => void;
 };
 
 export function LogSessionModal({
   session,
+  canEdit = true,
   onClose,
   onSaved,
 }: LogSessionModalProps) {
+  const canLog = canEdit && !session.completed && !session.skipped;
+  const plannedDuration = String(session.planned_duration_min ?? 0);
+
   const [duration, setDuration] = useState(
-    String(session.planned_duration_min ?? 0)
+    String(session.actual_duration_min ?? session.planned_duration_min ?? 0)
   );
-  const [completed, setCompleted] = useState(true);
-  const [skipped, setSkipped] = useState(false);
+  const [completed, setCompleted] = useState(
+    session.skipped ? false : true
+  );
+  const [skipped, setSkipped] = useState(session.skipped);
   const [skipReason, setSkipReason] = useState(session.skip_reason ?? '');
   const [calories, setCalories] = useState(
     session.actual_calories_kcal != null
@@ -28,21 +35,34 @@ export function LogSessionModal({
   const [notes, setNotes] = useState(session.execution_notes ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
 
   function setCompletedToggle(value: boolean) {
+    setNeedsConfirm(false);
     setCompleted(value);
     if (value) setSkipped(false);
   }
 
   function setSkippedToggle(value: boolean) {
+    setNeedsConfirm(false);
     setSkipped(value);
     if (value) setCompleted(false);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function isUnchanged(): boolean {
+    return (
+      duration === plannedDuration &&
+      completed &&
+      !skipped &&
+      calories.trim() === '' &&
+      notes.trim() === ''
+    );
+  }
+
+  async function submitLog() {
     setSaving(true);
     setError(null);
+    setNeedsConfirm(false);
 
     const durationNum = Number(duration);
     if (Number.isNaN(durationNum) || durationNum < 0) {
@@ -96,6 +116,19 @@ export function LogSessionModal({
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canLog) return;
+
+    if (isUnchanged() && !needsConfirm) {
+      setNeedsConfirm(true);
+      setError(null);
+      return;
+    }
+
+    await submitLog();
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center sm:px-4"
@@ -110,7 +143,7 @@ export function LogSessionModal({
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 id="log-session-title" className="text-base font-semibold">
-              Log session
+              {canLog ? 'Log session' : 'View session'}
             </h2>
             <p className="mt-0.5 text-sm text-gray-400">{session.title}</p>
           </div>
@@ -133,8 +166,12 @@ export function LogSessionModal({
               min={0}
               step={1}
               value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+              disabled={!canLog}
+              onChange={(e) => {
+                setNeedsConfirm(false);
+                setDuration(e.target.value);
+              }}
+              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-60"
               required
             />
           </label>
@@ -144,8 +181,9 @@ export function LogSessionModal({
               <input
                 type="checkbox"
                 checked={completed}
+                disabled={!canLog}
                 onChange={(e) => setCompletedToggle(e.target.checked)}
-                className="rounded border-gray-600"
+                className="rounded border-gray-600 disabled:opacity-60"
               />
               Completed
             </label>
@@ -153,8 +191,9 @@ export function LogSessionModal({
               <input
                 type="checkbox"
                 checked={skipped}
+                disabled={!canLog}
                 onChange={(e) => setSkippedToggle(e.target.checked)}
-                className="rounded border-gray-600"
+                className="rounded border-gray-600 disabled:opacity-60"
               />
               Skipped
             </label>
@@ -166,8 +205,12 @@ export function LogSessionModal({
               <input
                 type="text"
                 value={skipReason}
-                onChange={(e) => setSkipReason(e.target.value)}
-                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+                disabled={!canLog}
+                onChange={(e) => {
+                  setNeedsConfirm(false);
+                  setSkipReason(e.target.value);
+                }}
+                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-60"
                 placeholder="Skip reason"
               />
             </label>
@@ -182,8 +225,12 @@ export function LogSessionModal({
               min={0}
               step={1}
               value={calories}
-              onChange={(e) => setCalories(e.target.value)}
-              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+              disabled={!canLog}
+              onChange={(e) => {
+                setNeedsConfirm(false);
+                setCalories(e.target.value);
+              }}
+              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-60"
             />
           </label>
 
@@ -193,11 +240,43 @@ export function LogSessionModal({
             </span>
             <textarea
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              disabled={!canLog}
+              onChange={(e) => {
+                setNeedsConfirm(false);
+                setNotes(e.target.value);
+              }}
               rows={3}
-              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-60"
             />
           </label>
+
+          {canLog && needsConfirm && (
+            <div
+              className="space-y-2 rounded border border-amber-800/60 bg-amber-950/40 px-3 py-3"
+              role="status"
+            >
+              <p className="text-sm text-amber-200">
+                Nothing was edited. Confirm that this session is completed?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNeedsConfirm(false)}
+                  className="flex-1 rounded border border-gray-600 py-2 text-sm text-gray-300 hover:bg-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submitLog()}
+                  disabled={saving}
+                  className="flex-1 rounded bg-amber-200 py-2 text-sm font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Confirm'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {error && (
             <p className="text-sm text-red-400" role="alert">
@@ -205,13 +284,15 @@ export function LogSessionModal({
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={saving || (!completed && !skipped)}
-            className="w-full rounded bg-white py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          {canLog && !needsConfirm && (
+            <button
+              type="submit"
+              disabled={saving || (!completed && !skipped)}
+              className="w-full rounded bg-white py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          )}
         </form>
       </div>
     </div>

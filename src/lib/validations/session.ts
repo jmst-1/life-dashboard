@@ -83,6 +83,9 @@ export const completeSessionSchema = z
     execution_notes: z.string().nullable().optional(),
     skip_reason: z.string().nullable().optional(),
     exercise_log: z.array(exerciseLogEntrySchema).optional(),
+    rpe: z.number().int().min(1).max(10).nullable().optional(),
+    tasks_done: z.array(z.string()).optional(),
+    timed_duration_sec: z.number().int().nonnegative().nullable().optional(),
   })
   .refine((data) => !(data.completed && data.skipped), {
     message: 'completed and skipped cannot both be true',

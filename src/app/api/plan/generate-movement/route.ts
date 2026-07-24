@@ -9,12 +9,14 @@ import {
   getWeekById,
   insertMovementSessions,
 } from '@/lib/db';
+import { getCategoryMode } from '@/lib/category-mode';
 import {
   buildMovementDayMap,
   libraryTypeFromCategoryName,
   pickWeeklyRoutines,
 } from '@/lib/movement';
 import { createClient } from '@/lib/supabase/server';
+import { isWeekPlannableByDate } from '@/lib/weeks';
 import { generateMovementBodySchema } from '@/lib/validations/plan';
 
 export async function POST(request: Request) {
@@ -52,21 +54,38 @@ export async function POST(request: Request) {
     if (!week) {
       return NextResponse.json({ error: 'Week not found' }, { status: 404 });
     }
+    if (!isWeekPlannableByDate(week.week_start)) {
+      return NextResponse.json(
+        { error: 'Past weeks cannot be planned' },
+        { status: 400 }
+      );
+    }
     if (!category) {
       return NextResponse.json({ error: 'Category not found' }, { status: 404 });
     }
-    if (category.tracking_type !== 'random_pick') {
+    if (getCategoryMode(category) !== 'seeded') {
       return NextResponse.json(
-        { error: 'Category must have tracking_type random_pick' },
+        { error: 'Category must be seeded (random_pick) mode' },
         { status: 400 }
       );
+    }
+
+    const existingForCategory = await getSessions(supabase, user.id, weekId).then(
+      (all) => all.filter((s) => s.category_id === categoryId)
+    );
+    if (existingForCategory.length > 0) {
+      return NextResponse.json({
+        sessions: existingForCategory,
+        skipped: true,
+        reason: 'existing_plan',
+      });
     }
 
     const libraryType = libraryTypeFromCategoryName(category.name);
     const [library, weekSessions, categories, recentEntryIds] =
       await Promise.all([
         getActiveMovementLibrary(supabase),
-        getSessions(supabase, weekId),
+        getSessions(supabase, user.id, weekId),
         getCategories(supabase, user.id, 'active'),
         getRecentMovementEntryIds(supabase, user.id),
       ]);

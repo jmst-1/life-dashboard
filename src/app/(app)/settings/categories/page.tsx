@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { CategoryList } from '@/components/categories/category-list';
+import { SetHeader } from '@/components/layout/header-context';
 import { getCategories } from '@/lib/db';
 import { PRODUCT_CONFIG, PRODUCT_MODE } from '@/lib/product-config';
 import { createClient } from '@/lib/supabase/server';
@@ -23,20 +24,18 @@ export default async function CategoriesPage() {
     PRODUCT_CONFIG[PRODUCT_MODE].allowCustomCategories;
 
   return (
-    <div className="min-h-screen bg-gray-950 px-4 py-8 text-white">
-      <div className="mx-auto max-w-2xl">
-        <h1 className="text-xl font-semibold">Categories</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Manage the activities you track each week.
-        </p>
+    <div className="px-5 pb-8 pt-4 text-ld-text">
+      <SetHeader title="Categories" backHref="/settings" />
+      <p className="text-[13px] text-ld-text-sub">
+        Manage the activities you track each week.
+      </p>
 
-        <div className="mt-8">
-          <CategoryList
-            active={active}
-            archived={archived}
-            allowCustomCategories={allowCustomCategories}
-          />
-        </div>
+      <div className="mt-6">
+        <CategoryList
+          active={active}
+          archived={archived}
+          allowCustomCategories={allowCustomCategories}
+        />
       </div>
     </div>
   );

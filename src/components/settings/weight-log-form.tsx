@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { WeightLog } from '@/types';
 
 const inputClassName =
-  'mt-1 w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none focus:border-gray-500';
+  'mt-1 w-full rounded-xl border border-ld-border bg-ld-surface-high px-4 py-3 text-[15px] text-ld-text outline-none focus:border-ld-border-bright';
 
 type WeightLogFormProps = {
   logs: WeightLog[];
@@ -56,10 +56,12 @@ export function WeightLogForm({ logs }: WeightLogFormProps) {
   return (
     <div className="space-y-8">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <h2 className="text-sm font-medium text-gray-300">Log weigh-in</h2>
+        <h2 className="text-[11px] font-bold tracking-wider text-ld-text-muted">
+          LOG WEIGH-IN
+        </h2>
 
-        <label className="block text-sm">
-          <span className="text-gray-400">Date</span>
+        <label className="block">
+          <span className="text-xs font-semibold text-ld-text-sub">Date</span>
           <input
             type="date"
             required
@@ -69,8 +71,10 @@ export function WeightLogForm({ logs }: WeightLogFormProps) {
           />
         </label>
 
-        <label className="block text-sm">
-          <span className="text-gray-400">Weight (kg)</span>
+        <label className="block">
+          <span className="text-xs font-semibold text-ld-text-sub">
+            Weight (kg)
+          </span>
           <input
             type="number"
             step="0.1"
@@ -82,9 +86,10 @@ export function WeightLogForm({ logs }: WeightLogFormProps) {
           />
         </label>
 
-        <label className="block text-sm">
-          <span className="text-gray-400">
-            Notes <span className="text-gray-500">(optional)</span>
+        <label className="block">
+          <span className="text-xs font-semibold text-ld-text-sub">
+            Notes{' '}
+            <span className="font-normal text-ld-text-muted">(optional)</span>
           </span>
           <input
             type="text"
@@ -95,7 +100,7 @@ export function WeightLogForm({ logs }: WeightLogFormProps) {
         </label>
 
         {error && (
-          <p className="text-sm text-red-400" role="alert">
+          <p className="text-sm text-ld-red" role="alert">
             {error}
           </p>
         )}
@@ -103,32 +108,38 @@ export function WeightLogForm({ logs }: WeightLogFormProps) {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded bg-white px-4 py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:opacity-50"
+          className="w-full rounded-[14px] bg-ld-orange py-3.5 text-[15px] font-extrabold text-white disabled:opacity-60"
         >
           {loading ? 'Saving…' : 'Log weigh-in'}
         </button>
       </form>
 
       <div>
-        <h2 className="text-sm font-medium text-gray-300">History</h2>
+        <h2 className="text-[11px] font-bold tracking-wider text-ld-text-muted">
+          HISTORY
+        </h2>
         {logs.length === 0 ? (
-          <p className="mt-3 text-sm text-gray-500">No weigh-ins yet.</p>
+          <div className="mt-3 rounded-2xl border border-dashed border-ld-border bg-ld-surface p-6 text-center text-sm text-ld-text-sub">
+            No weigh-ins yet.
+          </div>
         ) : (
-          <ul className="mt-3 divide-y divide-gray-800 rounded border border-gray-700">
+          <ul className="mt-3 flex flex-col gap-2">
             {logs.map((log) => (
               <li
                 key={log.id}
-                className="flex items-start justify-between gap-4 px-4 py-3 text-sm"
+                className="flex items-start justify-between gap-4 rounded-[14px] border border-ld-border bg-ld-surface px-4 py-3"
               >
                 <div>
-                  <p className="font-medium text-white">
+                  <p className="text-sm font-bold text-ld-text">
                     {log.weight_kg} kg
                   </p>
                   {log.notes && (
-                    <p className="mt-0.5 text-xs text-gray-400">{log.notes}</p>
+                    <p className="mt-0.5 text-xs text-ld-text-sub">
+                      {log.notes}
+                    </p>
                   )}
                 </div>
-                <time className="shrink-0 text-xs text-gray-500">
+                <time className="shrink-0 text-[11px] text-ld-text-muted">
                   {log.logged_date}
                 </time>
               </li>

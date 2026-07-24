@@ -1,12 +1,17 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Category, TrainingPhase } from '@/types';
 import { derivePhase } from '@/lib/training-phase';
 
 const inputClassName =
-  'mt-1 w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none focus:border-gray-500';
+  'mt-1 w-full rounded-xl border border-ld-border bg-ld-surface-high px-4 py-3 text-[15px] text-ld-text outline-none focus:border-ld-border-bright';
+
+const chipSelected =
+  'border-ld-orange bg-ld-orange/15 text-ld-text';
+const chipIdle =
+  'border-ld-border bg-ld-surface-high text-ld-text-sub hover:border-ld-border-bright';
 
 const DEFAULT_EQUIPMENT =
   'Smart trainer (Rouvy ERG), outdoor bike with power meter';
@@ -24,54 +29,89 @@ function formatPhase(phase: TrainingPhase): string {
   return phase.charAt(0).toUpperCase() + phase.slice(1);
 }
 
+type CyclingSnapshot = {
+  ftp: string;
+  phase: Exclude<TrainingPhase, 'race_week'>;
+  goalEventName: string;
+  goalEventDate: string;
+  goalEventNotes: string;
+  goals: string;
+  equipmentNotes: string;
+  injuryNotes: string;
+};
+
 type CyclingCoachFormProps = {
   category: Category;
 };
 
-export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
-  const router = useRouter();
+function buildInitial(category: Category): CyclingSnapshot {
   const ctx = category.coach_context ?? {};
-
-  const [ftp, setFtp] = useState(
-    typeof ctx.ftp === 'number' ? String(ctx.ftp) : ''
-  );
-  const initialPhase: Exclude<TrainingPhase, 'race_week'> =
+  const phase: Exclude<TrainingPhase, 'race_week'> =
     typeof ctx.phase === 'string' &&
     (EDITABLE_PHASES as readonly string[]).includes(ctx.phase)
       ? (ctx.phase as Exclude<TrainingPhase, 'race_week'>)
       : 'base';
-  const [phase, setPhase] = useState(initialPhase);
-  const [goalEventName, setGoalEventName] = useState(
-    category.goal_event_name ?? ''
-  );
-  const [goalEventDate, setGoalEventDate] = useState(
-    category.goal_event_date ?? ''
-  );
-  const [goalEventNotes, setGoalEventNotes] = useState(
-    category.goal_event_notes ?? ''
-  );
-  const [goals, setGoals] = useState(
-    typeof ctx.goals === 'string' ? ctx.goals : ''
-  );
-  const [equipmentNotes, setEquipmentNotes] = useState(
-    typeof ctx.equipment_notes === 'string' && ctx.equipment_notes
-      ? ctx.equipment_notes
-      : DEFAULT_EQUIPMENT
-  );
-  const [injuryNotes, setInjuryNotes] = useState(
-    typeof ctx.injury_notes === 'string' ? ctx.injury_notes : ''
-  );
+  return {
+    ftp: typeof ctx.ftp === 'number' ? String(ctx.ftp) : '',
+    phase,
+    goalEventName: category.goal_event_name ?? '',
+    goalEventDate: category.goal_event_date ?? '',
+    goalEventNotes: category.goal_event_notes ?? '',
+    goals: typeof ctx.goals === 'string' ? ctx.goals : '',
+    equipmentNotes:
+      typeof ctx.equipment_notes === 'string' && ctx.equipment_notes
+        ? ctx.equipment_notes
+        : DEFAULT_EQUIPMENT,
+    injuryNotes:
+      typeof ctx.injury_notes === 'string' ? ctx.injury_notes : '',
+  };
+}
+
+export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
+  const router = useRouter();
+  const ctx = category.coach_context ?? {};
+  const [snapshot, setSnapshot] = useState(() => buildInitial(category));
+  const [ftp, setFtp] = useState(snapshot.ftp);
+  const [phase, setPhase] = useState(snapshot.phase);
+  const [goalEventName, setGoalEventName] = useState(snapshot.goalEventName);
+  const [goalEventDate, setGoalEventDate] = useState(snapshot.goalEventDate);
+  const [goalEventNotes, setGoalEventNotes] = useState(snapshot.goalEventNotes);
+  const [goals, setGoals] = useState(snapshot.goals);
+  const [equipmentNotes, setEquipmentNotes] = useState(snapshot.equipmentNotes);
+  const [injuryNotes, setInjuryNotes] = useState(snapshot.injuryNotes);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
   const derivedPhase = goalEventDate ? derivePhase(goalEventDate) : null;
   const phaseAuto = derivedPhase != null;
 
+  const isDirty = useMemo(
+    () =>
+      ftp !== snapshot.ftp ||
+      phase !== snapshot.phase ||
+      goalEventName !== snapshot.goalEventName ||
+      goalEventDate !== snapshot.goalEventDate ||
+      goalEventNotes !== snapshot.goalEventNotes ||
+      goals !== snapshot.goals ||
+      equipmentNotes !== snapshot.equipmentNotes ||
+      injuryNotes !== snapshot.injuryNotes,
+    [
+      ftp,
+      phase,
+      goalEventName,
+      goalEventDate,
+      goalEventNotes,
+      goals,
+      equipmentNotes,
+      injuryNotes,
+      snapshot,
+    ]
+  );
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!isDirty) return;
     setError(null);
-    setSuccess(false);
 
     const ftpNum = Number(ftp);
     if (!ftp || Number.isNaN(ftpNum) || ftpNum <= 0) {
@@ -105,7 +145,16 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
         setError(data.error ?? 'Failed to save');
         return;
       }
-      setSuccess(true);
+      setSnapshot({
+        ftp,
+        phase,
+        goalEventName,
+        goalEventDate,
+        goalEventNotes,
+        goals,
+        equipmentNotes,
+        injuryNotes,
+      });
       router.refresh();
     } catch {
       setError('Something went wrong. Please try again.');
@@ -116,8 +165,10 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      <label className="block text-sm">
-        <span className="text-gray-300">FTP (watts)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          FTP (watts)
+        </span>
         <input
           type="number"
           step="1"
@@ -127,19 +178,21 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
           onChange={(e) => setFtp(e.target.value)}
           className={inputClassName}
         />
-        <span className="mt-1 block text-xs text-gray-500">
+        <span className="mt-1 block text-[11px] text-ld-text-muted">
           Required for plan generation.
         </span>
       </label>
 
       <div>
-        <span className="text-sm text-gray-300">Training phase</span>
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Training phase
+        </span>
         {phaseAuto && derivedPhase ? (
           <div className="mt-2">
-            <span className="inline-flex rounded-full border border-gray-600 bg-gray-900 px-3 py-1 text-sm capitalize text-white">
+            <span className="inline-flex rounded-[14px] border border-ld-orange bg-ld-orange/15 px-3 py-1.5 text-sm capitalize text-ld-text">
               {formatPhase(derivedPhase)}
             </span>
-            <p className="mt-1.5 text-xs text-gray-500">
+            <p className="mt-1.5 text-[11px] text-ld-text-muted">
               Auto-derived from your goal event
             </p>
           </div>
@@ -150,10 +203,8 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
                 key={p}
                 type="button"
                 onClick={() => setPhase(p)}
-                className={`rounded border px-3 py-1.5 text-sm capitalize ${
-                  phase === p
-                    ? 'border-white bg-gray-800 text-white'
-                    : 'border-gray-700 text-gray-400 hover:border-gray-500'
+                className={`rounded-[14px] border px-3 py-1.5 text-sm capitalize ${
+                  phase === p ? chipSelected : chipIdle
                 }`}
               >
                 {formatPhase(p)}
@@ -163,9 +214,10 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
         )}
       </div>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">
-          Goal event name <span className="text-gray-500">(optional)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Goal event name{' '}
+          <span className="font-normal text-ld-text-muted">(optional)</span>
         </span>
         <input
           type="text"
@@ -175,9 +227,10 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">
-          Goal event date <span className="text-gray-500">(optional)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Goal event date{' '}
+          <span className="font-normal text-ld-text-muted">(optional)</span>
         </span>
         <input
           type="date"
@@ -187,9 +240,10 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">
-          Goal event notes <span className="text-gray-500">(optional)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Goal event notes{' '}
+          <span className="font-normal text-ld-text-muted">(optional)</span>
         </span>
         <textarea
           rows={2}
@@ -199,8 +253,8 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">Goals</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">Goals</span>
         <textarea
           rows={3}
           value={goals}
@@ -209,8 +263,10 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">Equipment notes</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Equipment notes
+        </span>
         <textarea
           rows={2}
           value={equipmentNotes}
@@ -219,8 +275,10 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">Injury / constraint notes</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Injury / constraint notes
+        </span>
         <textarea
           rows={3}
           value={injuryNotes}
@@ -230,20 +288,15 @@ export function CyclingCoachForm({ category }: CyclingCoachFormProps) {
       </label>
 
       {error && (
-        <p className="text-sm text-red-400" role="alert">
+        <p className="text-sm text-ld-red" role="alert">
           {error}
-        </p>
-      )}
-      {success && (
-        <p className="text-sm text-green-400" role="status">
-          Saved.
         </p>
       )}
 
       <button
         type="submit"
-        disabled={loading}
-        className="w-full rounded bg-white px-4 py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:opacity-50"
+        disabled={!isDirty || loading}
+        className="w-full rounded-[14px] bg-ld-orange py-3.5 text-[15px] font-extrabold text-white disabled:opacity-60"
       >
         {loading ? 'Saving…' : 'Save'}
       </button>

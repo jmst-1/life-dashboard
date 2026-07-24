@@ -28,6 +28,7 @@ import {
   Waves,
   Wind,
   Zap,
+  TrendingUp,
 } from 'lucide-react';
 import {
   normalizeCategoryIcon,
@@ -63,6 +64,7 @@ const ICON_MAP: Record<CategoryIconKey, LucideIcon> = {
   'tree-pine': TreePine,
   wind: Wind,
   sailboat: Sailboat,
+  'trending-up': TrendingUp,
 };
 
 type CategoryGlyphProps = {

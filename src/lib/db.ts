@@ -1,6 +1,11 @@
 import { format, startOfWeek } from 'date-fns';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { plannedDateForDay } from '@/lib/plan-context';
+import {
+  normalizeCategories,
+  normalizeCategory,
+  syncedModeFields,
+} from '@/lib/normalize-category';
 import type {
   Category,
   CyclingZone,
@@ -176,7 +181,7 @@ export async function getCategories(
     return [];
   }
 
-  return (data ?? []) as Category[];
+  return normalizeCategories((data ?? []) as Category[]);
 }
 
 export async function getCategoryById(
@@ -196,14 +201,20 @@ export async function getCategoryById(
     return null;
   }
 
-  return data as Category | null;
+  return data ? normalizeCategory(data as Category) : null;
 }
 
 export type CreateCategoryInput = {
   name: string;
   icon: string;
   color: string;
+  color_dim?: string | null;
   tracking_type: Category['tracking_type'];
+  mode?: Category['mode'];
+  effort_type?: Category['effort_type'];
+  sessions_per_week?: number;
+  timed_session?: boolean;
+  task_template?: Category['task_template'];
   ai_enabled: boolean;
   affects_nutrition: boolean;
   nutrition_met: number;
@@ -216,6 +227,11 @@ export async function createCategory(
   userId: string,
   input: CreateCategoryInput
 ): Promise<{ category: Category | null; error: string | null }> {
+  const synced = syncedModeFields({
+    mode: input.mode ?? undefined,
+    tracking_type: input.tracking_type,
+  });
+
   const { data, error } = await supabase
     .from('categories')
     .insert({
@@ -223,7 +239,13 @@ export async function createCategory(
       name: input.name,
       icon: input.icon,
       color: input.color,
-      tracking_type: input.tracking_type,
+      color_dim: input.color_dim ?? null,
+      tracking_type: synced.tracking_type,
+      mode: synced.mode,
+      effort_type: input.effort_type ?? 'duration',
+      sessions_per_week: input.sessions_per_week ?? 3,
+      timed_session: input.timed_session ?? false,
+      task_template: input.task_template ?? [],
       ai_enabled: input.ai_enabled,
       affects_nutrition: input.affects_nutrition,
       nutrition_met: input.nutrition_met,
@@ -242,13 +264,23 @@ export async function createCategory(
     return { category: null, error: error.message };
   }
 
-  return { category: data as Category, error: null };
+  return {
+    category: data ? normalizeCategory(data as Category) : null,
+    error: null,
+  };
 }
 
 export type UpdateCategoryInput = {
   name?: string;
   icon?: string;
   color?: string;
+  color_dim?: string | null;
+  tracking_type?: Category['tracking_type'];
+  mode?: Category['mode'];
+  effort_type?: Category['effort_type'];
+  sessions_per_week?: number;
+  timed_session?: boolean;
+  task_template?: Category['task_template'];
   ai_enabled?: boolean;
   affects_nutrition?: boolean;
   nutrition_met?: number;
@@ -265,12 +297,23 @@ export async function updateCategory(
   id: string,
   input: UpdateCategoryInput
 ): Promise<{ category: Category | null; error: string | null }> {
+  const patch: Record<string, unknown> = {
+    ...input,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.mode !== undefined || input.tracking_type !== undefined) {
+    const synced = syncedModeFields({
+      mode: input.mode ?? undefined,
+      tracking_type: input.tracking_type,
+    });
+    patch.mode = synced.mode;
+    patch.tracking_type = synced.tracking_type;
+  }
+
   const { data, error } = await supabase
     .from('categories')
-    .update({
-      ...input,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq('id', id)
     .eq('user_id', userId)
     .select('*')
@@ -284,7 +327,10 @@ export async function updateCategory(
     return { category: null, error: error.message };
   }
 
-  return { category: data as Category, error: null };
+  return {
+    category: data ? normalizeCategory(data as Category) : null,
+    error: null,
+  };
 }
 
 export async function archiveCategory(
@@ -313,11 +359,13 @@ export async function archiveCategory(
 
 export async function getSessions(
   supabase: SupabaseClient,
+  userId: string,
   weekId: string
 ): Promise<Session[]> {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
+    .eq('user_id', userId)
     .eq('week_id', weekId)
     .order('day_of_week')
     .order('sort_order');
@@ -327,7 +375,12 @@ export async function getSessions(
     return [];
   }
 
-  return (data ?? []) as Session[];
+  return ((data ?? []) as Session[]).map((s) => ({
+    ...s,
+    tasks_done: Array.isArray(s.tasks_done) ? s.tasks_done : [],
+    rpe: s.rpe ?? null,
+    timed_duration_sec: s.timed_duration_sec ?? null,
+  }));
 }
 
 export async function getWeekById(
@@ -403,12 +456,14 @@ export async function getWeekReviewsForCategory(
 
 export async function getSessionsByWeekAndCategory(
   supabase: SupabaseClient,
+  userId: string,
   weekId: string,
   categoryId: string
 ): Promise<Session[]> {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
+    .eq('user_id', userId)
     .eq('week_id', weekId)
     .eq('category_id', categoryId)
     .order('day_of_week')
@@ -536,6 +591,9 @@ export type UpdateSessionInput = {
   execution_notes?: string | null;
   completed_at?: string | null;
   exercise_log?: ExerciseLogEntry[] | null;
+  rpe?: number | null;
+  tasks_done?: string[];
+  timed_duration_sec?: number | null;
 };
 
 export async function getActiveMovementLibrary(
@@ -779,7 +837,6 @@ export async function swapSessionDays(
   if (
     sessionA.week_id !== weekId ||
     sessionB.week_id !== weekId ||
-    sessionA.category_id !== sessionB.category_id ||
     sessionA.user_id !== userId ||
     sessionB.user_id !== userId
   ) {
@@ -801,15 +858,16 @@ export async function swapSessionDays(
     sort_order: sessionB.sort_order,
   };
 
+  // Stage unique sort_orders only (keep day_of_week in 0–6 for DB CHECK).
   const [stageA, stageB] = await Promise.all([
     supabase
       .from('sessions')
-      .update({ day_of_week: 100, sort_order: -1 })
+      .update({ sort_order: -1 })
       .eq('id', sessionA.id)
       .eq('user_id', userId),
     supabase
       .from('sessions')
-      .update({ day_of_week: 101, sort_order: -2 })
+      .update({ sort_order: -2 })
       .eq('id', sessionB.id)
       .eq('user_id', userId),
   ]);
@@ -914,12 +972,11 @@ export async function reorderCategorySessions(
     sort_order: s.sort_order,
   }));
 
-  // Stage unique temporary sort_orders so day swaps cannot collide mid-update.
+  // Stage unique temporary sort_orders (keep day_of_week in 0–6 for DB CHECK).
   for (let i = 0; i < orderedSessionIds.length; i++) {
     const { error: stageError } = await supabase
       .from('sessions')
       .update({
-        day_of_week: 100 + i,
         sort_order: -(i + 1),
       })
       .eq('id', orderedSessionIds[i])
@@ -990,6 +1047,7 @@ export type UpsertNutritionPlanInput = {
   training_calories_map: Record<string, number>;
   macro_guide: NutritionPlan['macro_guide'];
   meal_prep_brief: string;
+  meal_prep_summary?: string | null;
 };
 
 export async function upsertNutritionPlan(
@@ -1022,12 +1080,14 @@ export async function updateNutritionPlanBrief(
   supabase: SupabaseClient,
   userId: string,
   weekId: string,
-  mealPrepBrief: string
+  mealPrepBrief: string,
+  mealPrepSummary: string | null = null
 ): Promise<{ nutritionPlan: NutritionPlan | null; error: string | null }> {
   const { data, error } = await supabase
     .from('nutrition_plans')
     .update({
       meal_prep_brief: mealPrepBrief,
+      meal_prep_summary: mealPrepSummary,
       generated_at: new Date().toISOString(),
     })
     .eq('user_id', userId)
@@ -1045,4 +1105,232 @@ export async function updateNutritionPlanBrief(
   }
 
   return { nutritionPlan: data as NutritionPlan, error: null };
+}
+
+export async function getWeeksInRange(
+  supabase: SupabaseClient,
+  userId: string,
+  fromStart: string,
+  toStart: string
+): Promise<Week[]> {
+  const { data, error } = await supabase
+    .from('weeks')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('week_start', fromStart)
+    .lte('week_start', toStart)
+    .order('week_start', { ascending: true });
+
+  if (error) {
+    console.error('getWeeksInRange error:', error);
+    return [];
+  }
+
+  return (data ?? []) as Week[];
+}
+
+export async function getRecentWeeks(
+  supabase: SupabaseClient,
+  userId: string,
+  limit = 12
+): Promise<Week[]> {
+  const { data, error } = await supabase
+    .from('weeks')
+    .select('*')
+    .eq('user_id', userId)
+    .order('week_start', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('getRecentWeeks error:', error);
+    return [];
+  }
+
+  return (data ?? []) as Week[];
+}
+
+export async function getGoalEvents(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<import('@/types').GoalEvent[]> {
+  const { data, error } = await supabase
+    .from('goal_events')
+    .select('*')
+    .eq('user_id', userId)
+    .order('event_date', { ascending: true });
+
+  if (error) {
+    console.error('getGoalEvents error:', error);
+    return [];
+  }
+
+  return (data ?? []) as import('@/types').GoalEvent[];
+}
+
+export async function createGoalEvent(
+  supabase: SupabaseClient,
+  userId: string,
+  input: {
+    label: string;
+    event_date: string;
+    event_type: string;
+    distances: string[];
+  }
+): Promise<{
+  event: import('@/types').GoalEvent | null;
+  error: string | null;
+}> {
+  const { data, error } = await supabase
+    .from('goal_events')
+    .insert({
+      user_id: userId,
+      label: input.label,
+      event_date: input.event_date,
+      event_type: input.event_type,
+      distances: input.distances,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('createGoalEvent error:', error);
+    return { event: null, error: error.message };
+  }
+
+  return { event: data as import('@/types').GoalEvent, error: null };
+}
+
+export async function updateGoalEvent(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string,
+  input: Partial<{
+    label: string;
+    event_date: string;
+    event_type: string;
+    distances: string[];
+  }>
+): Promise<{
+  event: import('@/types').GoalEvent | null;
+  error: string | null;
+}> {
+  const { data, error } = await supabase
+    .from('goal_events')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    console.error('updateGoalEvent error:', error);
+    return { event: null, error: error.message };
+  }
+  if (!data) {
+    return { event: null, error: 'Goal event not found' };
+  }
+
+  return { event: data as import('@/types').GoalEvent, error: null };
+}
+
+export async function deleteGoalEvent(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('goal_events')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('deleteGoalEvent error:', error);
+    return { error: error.message };
+  }
+
+  return { error: null };
+}
+
+export async function upsertWeekReview(
+  supabase: SupabaseClient,
+  userId: string,
+  input: {
+    week_id: string;
+    category_id: string;
+    score: number;
+    planned_min: number;
+    actual_min: number;
+    planned_sessions: number;
+    completed_sessions: number;
+    skipped_sessions: number;
+    missed_sessions: number;
+    completion_rate: number;
+  }
+): Promise<{ error: string | null }> {
+  const { data: existing } = await supabase
+    .from('week_reviews')
+    .select('id')
+    .eq('week_id', input.week_id)
+    .eq('category_id', input.category_id)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (existing?.id) {
+    const { error } = await supabase
+      .from('week_reviews')
+      .update(input)
+      .eq('id', existing.id)
+      .eq('user_id', userId);
+    if (error) {
+      console.error('upsertWeekReview update error:', error);
+      return { error: error.message };
+    }
+    return { error: null };
+  }
+
+  const { error } = await supabase.from('week_reviews').insert({
+    ...input,
+    user_id: userId,
+  });
+  if (error) {
+    console.error('upsertWeekReview insert error:', error);
+    return { error: error.message };
+  }
+  return { error: null };
+}
+
+export async function insertTrackedSessions(
+  supabase: SupabaseClient,
+  userId: string,
+  weekId: string,
+  weekStart: string,
+  categoryId: string,
+  slots: { day: number; title: string; sort_order: number }[]
+): Promise<{ sessions: Session[]; error: string | null }> {
+  const rows = slots.map((s) => ({
+    week_id: weekId,
+    user_id: userId,
+    category_id: categoryId,
+    day_of_week: s.day,
+    planned_date: plannedDateForDay(weekStart, s.day),
+    title: s.title,
+    description: null,
+    planned_duration_min: null,
+    session_type: 'tracked_slot',
+    sort_order: s.sort_order,
+    tasks_done: [],
+  }));
+
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert(rows)
+    .select('*');
+
+  if (error) {
+    console.error('insertTrackedSessions error:', error);
+    return { sessions: [], error: error.message };
+  }
+
+  return { sessions: (data ?? []) as Session[], error: null };
 }

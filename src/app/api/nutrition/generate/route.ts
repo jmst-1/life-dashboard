@@ -1,6 +1,7 @@
 import { parseISO } from 'date-fns';
 import { NextResponse } from 'next/server';
-import { callClaude } from '@/lib/claude';
+import { callClaude, parseClaudeJson } from '@/lib/claude';
+import { capReachedResponse, checkAndLogAiUsage } from '@/lib/ai-usage';
 import {
   getCategories,
   getNutritionPlanByWeek,
@@ -24,6 +25,7 @@ import {
 import {
   buildDayMapReadable,
   buildMealPrepPrompt,
+  type MealPrepClaudeResponse,
 } from '@/lib/prompts/nutrition';
 import { createClient } from '@/lib/supabase/server';
 import { generateNutritionBodySchema } from '@/lib/validations/nutrition';
@@ -92,6 +94,27 @@ function profileReadyForBmr(profile: Awaited<ReturnType<typeof getProfile>>) {
   );
 }
 
+/** Parse Claude meal-prep JSON; on failure treat the whole text as the brief. */
+function parseMealPrepResponse(raw: string): {
+  summary: string | null;
+  brief: string;
+} {
+  const trimmed = raw.trim();
+  try {
+    const parsed = parseClaudeJson<MealPrepClaudeResponse>(trimmed);
+    const brief =
+      typeof parsed.brief === 'string' ? parsed.brief.trim() : '';
+    const summary =
+      typeof parsed.summary === 'string' ? parsed.summary.trim() : '';
+    if (brief) {
+      return { summary: summary || null, brief };
+    }
+  } catch {
+    // fall through
+  }
+  return { summary: null, brief: trimmed };
+}
+
 async function generateFull(
   supabase: ReturnType<typeof createClient>,
   userId: string,
@@ -125,13 +148,22 @@ async function generateFull(
     );
   }
 
+  const existingPlan = await getNutritionPlanByWeek(supabase, userId, weekId);
+  if (existingPlan?.meal_prep_brief) {
+    return NextResponse.json({
+      nutritionPlan: existingPlan,
+      skipped: true,
+      reason: 'existing_plan',
+    });
+  }
+
   const nutritionCategories = categories.filter((c) => c.affects_nutrition);
   const categoriesById = Object.fromEntries(
     nutritionCategories.map((c) => [c.id, c])
   );
   const categoryIds = new Set(nutritionCategories.map((c) => c.id));
 
-  const allSessions = await getSessions(supabase, weekId);
+  const allSessions = await getSessions(supabase, userId, weekId);
   const sessions = allSessions.filter((s) => categoryIds.has(s.category_id));
   const byDay = groupSessionsByDay(sessions, categoriesById);
 
@@ -175,7 +207,21 @@ async function generateFull(
     planningNotes: week.planning_notes,
   });
 
-  const mealPrepBrief = (await callClaude(prompt, { maxTokens: 1200 })).trim();
+  const usage = await checkAndLogAiUsage({
+    supabase,
+    userId,
+    weekId,
+    callType: 'nutrition_brief',
+  });
+  if (!usage.allowed) {
+    return NextResponse.json(
+      capReachedResponse(usage.used, usage.cap, usage.error),
+      { status: 429 }
+    );
+  }
+
+  const raw = await callClaude(prompt, { maxTokens: 1400 });
+  const { summary, brief } = parseMealPrepResponse(raw);
 
   const storedMacroGuide: NutritionPlan['macro_guide'] = {
     day_types: macroGuide.day_types,
@@ -195,7 +241,8 @@ async function generateFull(
       race_week: raceWeek,
       training_calories_map: stringifyCalMap(trainingCalByDay),
       macro_guide: storedMacroGuide,
-      meal_prep_brief: mealPrepBrief,
+      meal_prep_brief: brief,
+      meal_prep_summary: summary,
     }
   );
 
@@ -237,7 +284,7 @@ async function generateBriefOnly(
     nutritionCategories.map((c) => [c.id, c])
   );
   const categoryIds = new Set(nutritionCategories.map((c) => c.id));
-  const allSessions = await getSessions(supabase, weekId);
+  const allSessions = await getSessions(supabase, userId, weekId);
   const sessions = allSessions.filter((s) => categoryIds.has(s.category_id));
   const byDay = groupSessionsByDay(sessions, categoriesById);
 
@@ -250,13 +297,28 @@ async function generateBriefOnly(
     planningNotes: week.planning_notes,
   });
 
-  const mealPrepBrief = (await callClaude(prompt, { maxTokens: 1200 })).trim();
+  const usage = await checkAndLogAiUsage({
+    supabase,
+    userId,
+    weekId,
+    callType: 'nutrition_brief',
+  });
+  if (!usage.allowed) {
+    return NextResponse.json(
+      capReachedResponse(usage.used, usage.cap, usage.error),
+      { status: 429 }
+    );
+  }
+
+  const raw = await callClaude(prompt, { maxTokens: 1400 });
+  const { summary, brief } = parseMealPrepResponse(raw);
 
   const { nutritionPlan, error } = await updateNutritionPlanBrief(
     supabase,
     userId,
     weekId,
-    mealPrepBrief
+    brief,
+    summary
   );
 
   if (error || !nutritionPlan) {

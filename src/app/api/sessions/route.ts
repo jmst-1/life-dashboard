@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
+  getCategoryById,
   getSessionsByWeekAndCategory,
   getWeekById,
   insertSessionFromSnapshot,
@@ -42,6 +43,7 @@ export async function GET(request: Request) {
 
   const sessions = await getSessionsByWeekAndCategory(
     supabase,
+    user.id,
     weekId,
     categoryId
   );
@@ -77,6 +79,11 @@ export async function POST(request: Request) {
   const week = await getWeekById(supabase, user.id, weekId);
   if (!week) {
     return NextResponse.json({ error: 'Week not found' }, { status: 404 });
+  }
+
+  const category = await getCategoryById(supabase, user.id, input.categoryId);
+  if (!category) {
+    return NextResponse.json({ error: 'Category not found' }, { status: 404 });
   }
 
   const { session, error } = await insertSessionFromSnapshot(

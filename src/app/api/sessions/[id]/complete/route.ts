@@ -61,6 +61,15 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (data.exercise_log !== undefined) {
     updates.exercise_log = data.exercise_log;
   }
+  if (data.rpe !== undefined) {
+    updates.rpe = data.rpe;
+  }
+  if (data.tasks_done !== undefined) {
+    updates.tasks_done = data.tasks_done;
+  }
+  if (data.timed_duration_sec !== undefined) {
+    updates.timed_duration_sec = data.timed_duration_sec;
+  }
   if (data.skipped) {
     updates.skip_reason = data.skip_reason ?? null;
   } else {

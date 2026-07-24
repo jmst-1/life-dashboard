@@ -16,11 +16,25 @@ export const generateMovementBodySchema = z.object({
 
 export type GenerateMovementBody = z.infer<typeof generateMovementBodySchema>;
 
+export const generateTrackedBodySchema = z.object({
+  weekId: z.string().uuid(),
+  categoryId: z.string().uuid(),
+});
+
+export type GenerateTrackedBody = z.infer<typeof generateTrackedBodySchema>;
+
 export const rerollMovementBodySchema = z.object({
   sessionId: z.string().uuid(),
 });
 
 export type RerollMovementBody = z.infer<typeof rerollMovementBodySchema>;
+
+export const copyFromLastWeekBodySchema = z.object({
+  weekId: z.string().uuid(),
+  categoryId: z.string().uuid(),
+});
+
+export type CopyFromLastWeekBody = z.infer<typeof copyFromLastWeekBodySchema>;
 
 const cyclingZoneSchema = z.object({
   name: z.string(),

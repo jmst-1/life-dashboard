@@ -23,10 +23,12 @@ Rules:
   Commentary is ONE combined Claude call per week, not one per category.
 - Date handling: week starts Monday. Store dates as ISO strings. Use date-fns for date math.
 - Every table has RLS by auth.uid() = user_id, except: invites (admin-only via is_admin),
-  ai_usage_log (select-only own rows; inserts server-side), movement_library (global entries
+  ai_usage_log (select-only own rows; inserts via service role in checkAndLogAiUsage), movement_library (global entries
   where user_id is null are readable by all authenticated users).
 - The only RLS-bypassing code path is the security-definer signup trigger. Never add another.
 - Signup requires a valid invite code, enforced in the trigger itself, not just client-side.
 - middleware.ts enforces: no session → /login; incomplete profile → /onboarding.
 - Keep coach system prompts in /lib/prompts/[category-type].ts, not inline in API routes.
+- Category modes: ai | seeded | tracked (dual-write with tracking_type ai_plan | random_pick | tracked).
+  Effort types: rpe | duration | binary. See lib/category-mode.ts and v6-bridge.md.
 

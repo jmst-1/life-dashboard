@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { callClaude, parseClaudeJson } from '@/lib/claude';
+import { capReachedResponse, checkAndLogAiUsage } from '@/lib/ai-usage';
 import { getCategoryRegistryEntry } from '@/lib/category-registry';
 import {
   deleteSessionsForWeekCategory,
@@ -18,6 +19,7 @@ import {
 } from '@/lib/plan-context';
 import { createClient } from '@/lib/supabase/server';
 import { derivePhase } from '@/lib/training-phase';
+import { isWeekPlannableByDate } from '@/lib/weeks';
 import {
   cyclingPlanResponseSchema,
   generatePlanBodySchema,
@@ -62,6 +64,12 @@ export async function POST(request: Request) {
     if (!week) {
       return NextResponse.json({ error: 'Week not found' }, { status: 404 });
     }
+    if (!isWeekPlannableByDate(week.week_start)) {
+      return NextResponse.json(
+        { error: 'Past weeks cannot be planned' },
+        { status: 400 }
+      );
+    }
     if (!category) {
       return NextResponse.json({ error: 'Category not found' }, { status: 404 });
     }
@@ -72,6 +80,20 @@ export async function POST(request: Request) {
         { error: 'Use /api/plan/generate-movement' },
         { status: 400 }
       );
+    }
+
+    const existingSessions = await getSessionsByWeekAndCategory(
+      supabase,
+      user.id,
+      weekId,
+      categoryId
+    );
+    if (existingSessions.length > 0) {
+      return NextResponse.json({
+        sessions: existingSessions,
+        skipped: true,
+        reason: 'existing_plan',
+      });
     }
 
     const { reviews, weeksById } = await getWeekReviewsForCategory(
@@ -103,6 +125,7 @@ export async function POST(request: Request) {
       if (cyclingCategory) {
         const cyclingSessions = await getSessionsByWeekAndCategory(
           supabase,
+          user.id,
           weekId,
           cyclingCategory.id
         );
@@ -111,6 +134,19 @@ export async function POST(request: Request) {
       }
     }
 
+    const goalsOr = (fallback: string) =>
+      typeof coach.goals === 'string' && coach.goals.trim()
+        ? coach.goals
+        : fallback;
+    const injuryOrNone =
+      typeof coach.injury_notes === 'string' && coach.injury_notes.trim()
+        ? coach.injury_notes
+        : 'None';
+    const equipmentOr = (fallback: string) =>
+      typeof coach.equipment_notes === 'string' && coach.equipment_notes.trim()
+        ? coach.equipment_notes
+        : fallback;
+
     let prompt: string;
     if (registry.typeKey === 'cycling') {
       prompt = registry.promptBuilder({
@@ -118,14 +154,8 @@ export async function POST(request: Request) {
         weight_kg: profile?.current_weight_kg ?? null,
         current_phase,
         goal_event_summary,
-        goals:
-          typeof coach.goals === 'string' && coach.goals.trim()
-            ? coach.goals
-            : 'General fitness',
-        injury_notes:
-          typeof coach.injury_notes === 'string' && coach.injury_notes.trim()
-            ? coach.injury_notes
-            : 'None',
+        goals: goalsOr('General fitness'),
+        injury_notes: injuryOrNone,
         recent_weeks_summary,
         planning_notes,
       });
@@ -139,15 +169,68 @@ export async function POST(request: Request) {
           typeof coach.equipment === 'string' && coach.equipment.trim()
             ? coach.equipment
             : 'Gym access',
-        goals:
-          typeof coach.goals === 'string' && coach.goals.trim()
-            ? coach.goals
-            : 'General strength',
-        injury_notes:
-          typeof coach.injury_notes === 'string' && coach.injury_notes.trim()
-            ? coach.injury_notes
-            : 'None',
+        goals: goalsOr('General strength'),
+        injury_notes: injuryOrNone,
         cycling_sessions_summary,
+        recent_weeks_summary,
+        planning_notes,
+      });
+    } else if (registry.typeKey === 'running') {
+      prompt = registry.promptBuilder({
+        threshold_pace:
+          typeof coach.threshold_pace === 'string' && coach.threshold_pace.trim()
+            ? coach.threshold_pace
+            : '5:00/km',
+        current_phase,
+        goal_event_summary,
+        goals: goalsOr('General running fitness'),
+        equipment_notes: equipmentOr('Road shoes, outdoor routes'),
+        injury_notes: injuryOrNone,
+        recent_weeks_summary,
+        planning_notes,
+      });
+    } else if (registry.typeKey === 'swimming') {
+      prompt = registry.promptBuilder({
+        css_per_100:
+          typeof coach.css_per_100 === 'string' && coach.css_per_100.trim()
+            ? coach.css_per_100
+            : '1:45/100m',
+        pool_length:
+          typeof coach.pool_length === 'string' && coach.pool_length.trim()
+            ? coach.pool_length
+            : '25m',
+        current_phase,
+        goal_event_summary,
+        goals: goalsOr('General swim fitness'),
+        equipment_notes: equipmentOr('Pull buoy, paddles, kickboard'),
+        injury_notes: injuryOrNone,
+        recent_weeks_summary,
+        planning_notes,
+      });
+    } else if (registry.typeKey === 'triathlon') {
+      prompt = registry.promptBuilder({
+        race_distance:
+          typeof coach.race_distance === 'string' && coach.race_distance.trim()
+            ? coach.race_distance
+            : 'olympic',
+        swim_css_per_100:
+          typeof coach.swim_css_per_100 === 'string' &&
+          coach.swim_css_per_100.trim()
+            ? coach.swim_css_per_100
+            : '1:45/100m',
+        bike_ftp: typeof coach.bike_ftp === 'number' ? coach.bike_ftp : 200,
+        run_threshold_pace:
+          typeof coach.run_threshold_pace === 'string' &&
+          coach.run_threshold_pace.trim()
+            ? coach.run_threshold_pace
+            : '5:00/km',
+        current_phase,
+        goal_event_summary,
+        goals: goalsOr('Complete the race strong'),
+        equipment_notes: equipmentOr(
+          'Pool, smart trainer / road bike, running shoes'
+        ),
+        injury_notes: injuryOrNone,
         recent_weeks_summary,
         planning_notes,
       });
@@ -167,6 +250,26 @@ export async function POST(request: Request) {
     }
 
     const strengthMaxTokens = 8000;
+
+    const callType =
+      registry.typeKey === 'cycling'
+        ? 'cycling_plan'
+        : registry.typeKey === 'strength'
+          ? 'strength_plan'
+          : 'custom_category_plan';
+    const usage = await checkAndLogAiUsage({
+      supabase,
+      userId: user.id,
+      weekId: week.id,
+      callType,
+    });
+    if (!usage.allowed) {
+      return NextResponse.json(
+        capReachedResponse(usage.used, usage.cap, usage.error),
+        { status: 429 }
+      );
+    }
+
     const raw = await callClaude(prompt, {
       // Strength plans with full exercise blocks are much larger than cycling.
       maxTokens: registry.typeKey === 'strength' ? strengthMaxTokens : undefined,

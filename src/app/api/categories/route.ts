@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createCategory } from '@/lib/db';
+import { syncedModeFields } from '@/lib/normalize-category';
 import { createClient } from '@/lib/supabase/server';
 import { createCategorySchema } from '@/lib/validations/category';
 
@@ -27,11 +28,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  const { category, error } = await createCategory(
-    supabase,
-    user.id,
-    parsed.data
-  );
+  const data = parsed.data;
+  const synced = syncedModeFields({
+    mode: data.mode,
+    tracking_type: data.tracking_type,
+  });
+
+  const { category, error } = await createCategory(supabase, user.id, {
+    ...data,
+    mode: synced.mode,
+    tracking_type: synced.tracking_type,
+  });
 
   if (error || !category) {
     const status = error === 'Category name already exists' ? 409 : 500;

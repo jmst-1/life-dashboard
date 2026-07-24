@@ -112,7 +112,9 @@ export function WeekBoard({
                         canEdit={canEdit}
                         onOpen={() => onOpenSession(session)}
                         onShuffle={
-                          canEdit
+                          canEdit &&
+                          !session.completed &&
+                          !session.skipped
                             ? () => onShuffleSession(session)
                             : undefined
                         }

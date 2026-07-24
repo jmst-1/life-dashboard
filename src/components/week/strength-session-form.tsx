@@ -14,6 +14,9 @@ type StrengthSessionFormProps = {
   canEdit: boolean;
 };
 
+const inputClassName =
+  'w-full rounded-xl border border-ld-border bg-ld-surface-high px-3 py-2.5 text-[14px] text-ld-text outline-none focus:border-ld-border-bright disabled:opacity-60';
+
 function parseDefaultReps(reps: string): number | null {
   const match = reps.match(/\d+/);
   if (!match) return null;
@@ -77,6 +80,25 @@ function buildInitialLog(session: Session): ExerciseLogEntry[] {
   return entries;
 }
 
+function logsMatch(a: ExerciseLogEntry[], b: ExerciseLogEntry[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (left.exercise_name !== right.exercise_name) return false;
+    if ((left.notes ?? null) !== (right.notes ?? null)) return false;
+    if (left.sets.length !== right.sets.length) return false;
+    for (let j = 0; j < left.sets.length; j++) {
+      const ls = left.sets[j];
+      const rs = right.sets[j];
+      if (ls.set_num !== rs.set_num) return false;
+      if (ls.reps !== rs.reps) return false;
+      if (ls.weight_kg !== rs.weight_kg) return false;
+    }
+  }
+  return true;
+}
+
 function numOrNull(value: string): number | null {
   if (value.trim() === '') return null;
   const n = Number(value);
@@ -89,14 +111,24 @@ export function StrengthSessionForm({
 }: StrengthSessionFormProps) {
   const router = useRouter();
   const blocks = session.blocks ?? [];
+  const canLog = canEdit && !session.completed && !session.skipped;
+  const [baselineLog] = useState(() => buildInitialLog(session));
+  const [baselineDuration] = useState(() =>
+    minutesToTimeValue(
+      session.actual_duration_min ?? session.planned_duration_min ?? 0
+    )
+  );
   const [log, setLog] = useState<ExerciseLogEntry[]>(() =>
     buildInitialLog(session)
   );
   const [duration, setDuration] = useState(() =>
-    minutesToTimeValue(session.planned_duration_min ?? 0)
+    minutesToTimeValue(
+      session.actual_duration_min ?? session.planned_duration_min ?? 0
+    )
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
 
   function updateSet(
     exerciseName: string,
@@ -104,6 +136,7 @@ export function StrengthSessionForm({
     field: 'reps' | 'weight_kg',
     value: string
   ) {
+    setNeedsConfirm(false);
     setLog((prev) =>
       prev.map((entry) => {
         if (entry.exercise_name !== exerciseName) return entry;
@@ -119,6 +152,7 @@ export function StrengthSessionForm({
   }
 
   function updateExerciseNotes(exerciseName: string, value: string) {
+    setNeedsConfirm(false);
     setLog((prev) =>
       prev.map((entry) => {
         if (entry.exercise_name !== exerciseName) return entry;
@@ -131,11 +165,14 @@ export function StrengthSessionForm({
     return log.find((e) => e.exercise_name === exerciseName);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canEdit) return;
+  function isUnchanged(): boolean {
+    return logsMatch(log, baselineLog) && duration === baselineDuration;
+  }
+
+  async function submitLog() {
     setSaving(true);
     setError(null);
+    setNeedsConfirm(false);
 
     const durationNum = timeValueToMinutes(duration);
     if (durationNum == null || durationNum < 0) {
@@ -164,7 +201,7 @@ export function StrengthSessionForm({
         setSaving(false);
         return;
       }
-      router.push('/week/current');
+      router.push('/today');
       router.refresh();
     } catch {
       setError('Failed to log session');
@@ -172,43 +209,62 @@ export function StrengthSessionForm({
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canLog) return;
+
+    if (isUnchanged() && !needsConfirm) {
+      setNeedsConfirm(true);
+      setError(null);
+      return;
+    }
+
+    await submitLog();
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-white">{session.title}</h1>
         {session.planned_duration_min != null && (
-          <p className="mt-1 text-sm text-gray-400">
+          <p className="text-[13px] text-ld-text-sub">
             {session.planned_duration_min} min planned
           </p>
         )}
+        {(session.completed || session.skipped) && (
+          <p className="mt-1 text-[11px] font-bold uppercase tracking-wide text-ld-green">
+            {session.completed ? 'Completed' : 'Skipped'}
+          </p>
+        )}
         {session.description && (
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+          <p className="mt-3 whitespace-pre-wrap rounded-2xl border border-ld-border bg-ld-surface p-4 text-[13px] leading-relaxed text-ld-text-sub">
             {session.description}
           </p>
         )}
       </div>
 
       {(blocks as StrengthBlock[]).map((block, bi) => (
-        <section key={`${block.name}-${bi}`} className="space-y-3">
-          <h2 className="text-sm font-semibold text-white">{block.name}</h2>
-          <ul className="space-y-4">
+        <section key={`${block.name}-${bi}`} className="space-y-2.5">
+          <h2 className="text-[11px] font-bold tracking-wide text-ld-text-muted">
+            {block.name.toUpperCase()}
+          </h2>
+          <ul className="space-y-3">
             {block.exercises.map((exercise, ei) => {
               const entry = getLogEntry(exercise.name);
               return (
                 <li
                   key={`${exercise.name}-${ei}`}
-                  className="rounded border border-gray-800 bg-gray-900/50 p-3"
+                  className="rounded-2xl border border-ld-border bg-ld-surface p-3.5"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-sm font-medium text-white">
+                    <p className="text-[14px] font-bold text-ld-text">
                       {exercise.name}
                     </p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-[12px] font-bold text-ld-orange">
                       {exercise.sets} × {exercise.reps}
                     </p>
                   </div>
                   {exercise.notes && (
-                    <p className="mt-1 text-xs text-gray-500">
+                    <p className="mt-1 text-[12px] text-ld-text-muted">
                       {exercise.notes}
                     </p>
                   )}
@@ -216,9 +272,9 @@ export function StrengthSessionForm({
                     {(entry?.sets ?? []).map((set) => (
                       <li
                         key={set.set_num}
-                        className="grid grid-cols-3 gap-2"
+                        className="grid grid-cols-3 items-center gap-2"
                       >
-                        <span className="text-xs font-medium text-gray-400 self-center">
+                        <span className="text-[12px] font-semibold text-ld-text-sub">
                           Set {set.set_num}
                         </span>
                         <input
@@ -226,7 +282,7 @@ export function StrengthSessionForm({
                           min={0}
                           step="any"
                           placeholder="kg"
-                          disabled={!canEdit}
+                          disabled={!canLog}
                           value={set.weight_kg ?? ''}
                           onChange={(e) =>
                             updateSet(
@@ -236,7 +292,7 @@ export function StrengthSessionForm({
                               e.target.value
                             )
                           }
-                          className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white disabled:opacity-60"
+                          className={inputClassName}
                           aria-label={`Set ${set.set_num} weight`}
                         />
                         <input
@@ -244,7 +300,7 @@ export function StrengthSessionForm({
                           min={0}
                           step={1}
                           placeholder="Reps"
-                          disabled={!canEdit}
+                          disabled={!canLog}
                           value={set.reps ?? ''}
                           onChange={(e) =>
                             updateSet(
@@ -254,7 +310,7 @@ export function StrengthSessionForm({
                               e.target.value
                             )
                           }
-                          className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white disabled:opacity-60"
+                          className={inputClassName}
                           aria-label={`Set ${set.set_num} reps`}
                         />
                       </li>
@@ -263,12 +319,12 @@ export function StrengthSessionForm({
                   <input
                     type="text"
                     placeholder="Notes"
-                    disabled={!canEdit}
+                    disabled={!canLog}
                     value={entry?.notes ?? ''}
                     onChange={(e) =>
                       updateExerciseNotes(exercise.name, e.target.value)
                     }
-                    className="mt-2 w-full rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white disabled:opacity-60"
+                    className={`mt-2 ${inputClassName}`}
                     aria-label={`${exercise.name} notes`}
                   />
                 </li>
@@ -278,10 +334,10 @@ export function StrengthSessionForm({
         </section>
       ))}
 
-      {canEdit && (
-        <div className="space-y-3 border-t border-gray-800 pt-4">
+      {canLog && (
+        <div className="space-y-3 border-t border-ld-border pt-4">
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-gray-400">
+            <span className="text-[12px] font-semibold text-ld-text-sub">
               Actual duration (HH:MM:SS)
             </span>
             <input
@@ -290,30 +346,73 @@ export function StrengthSessionForm({
               placeholder="00:50:00"
               pattern="\d{1,2}:[0-5]\d:[0-5]\d"
               value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 font-mono text-sm text-white tabular-nums"
+              onChange={(e) => {
+                setNeedsConfirm(false);
+                setDuration(e.target.value);
+              }}
+              className={`${inputClassName} font-mono tabular-nums`}
               required
             />
           </label>
+          {needsConfirm && (
+            <div
+              className="space-y-2 rounded-2xl border border-ld-amber/40 bg-ld-amber-dim px-3.5 py-3"
+              role="status"
+            >
+              <p className="text-[13px] text-ld-amber">
+                You haven&apos;t changed any values from the defaults. Log this
+                session anyway?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNeedsConfirm(false)}
+                  className="flex-1 rounded-xl border border-ld-border py-2.5 text-[13px] text-ld-text-sub"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submitLog()}
+                  disabled={saving}
+                  className="flex-1 rounded-xl bg-ld-amber py-2.5 text-[13px] font-bold text-ld-bg disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Log anyway'}
+                </button>
+              </div>
+            </div>
+          )}
           {error && (
-            <p className="text-sm text-red-400" role="alert">
+            <p className="text-sm text-ld-red" role="alert">
               {error}
             </p>
           )}
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full rounded bg-white py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Log session'}
-          </button>
+          {!needsConfirm && (
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full rounded-2xl bg-ld-orange py-3.5 text-[15px] font-extrabold text-white disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Log session'}
+            </button>
+          )}
         </div>
       )}
 
-      {!canEdit && (
-        <p className="text-sm text-gray-500">
-          This week is locked — logging is disabled.
-        </p>
+      {!canLog && (
+        <div className="space-y-2 border-t border-ld-border pt-4">
+          <p className="text-[13px] text-ld-text-sub">
+            Actual duration:{' '}
+            <span className="font-mono tabular-nums text-ld-text">
+              {duration}
+            </span>
+          </p>
+          {!canEdit && (
+            <p className="text-[13px] text-ld-text-muted">
+              This week is locked — logging is disabled.
+            </p>
+          )}
+        </div>
       )}
     </form>
   );

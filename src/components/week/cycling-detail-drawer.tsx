@@ -22,6 +22,7 @@ export function CyclingDetailDrawer({
   onLog,
 }: CyclingDetailDrawerProps) {
   const zones = session.zones ?? [];
+  const canLog = canEdit && !session.completed && !session.skipped;
 
   return (
     <div
@@ -39,11 +40,23 @@ export function CyclingDetailDrawer({
             <h2 id="cycling-detail-title" className="text-base font-semibold">
               {session.title}
             </h2>
-            {session.planned_duration_min != null && (
-              <p className="mt-0.5 text-sm text-gray-400">
-                {session.planned_duration_min} min
-              </p>
-            )}
+            <div className="mt-0.5 flex flex-wrap items-center gap-2">
+              {session.planned_duration_min != null && (
+                <p className="text-sm text-gray-400">
+                  {session.planned_duration_min} min
+                </p>
+              )}
+              {session.completed && (
+                <span className="rounded border border-emerald-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-300">
+                  Completed
+                </span>
+              )}
+              {session.skipped && (
+                <span className="rounded border border-gray-600 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                  Skipped
+                </span>
+              )}
+            </div>
           </div>
           <button
             type="button"
@@ -90,7 +103,7 @@ export function CyclingDetailDrawer({
           </div>
         )}
 
-        {canEdit && (
+        {canLog && (
           <button
             type="button"
             onClick={onLog}
@@ -98,6 +111,14 @@ export function CyclingDetailDrawer({
           >
             Log session
           </button>
+        )}
+
+        {!canLog && session.actual_duration_min != null && (
+          <p className="mt-5 border-t border-gray-800 pt-4 text-sm text-gray-400">
+            Logged duration: {session.actual_duration_min} min
+            {session.actual_calories_kcal != null &&
+              ` · ${session.actual_calories_kcal} kcal`}
+          </p>
         )}
       </div>
     </div>

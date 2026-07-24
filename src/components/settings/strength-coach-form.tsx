@@ -1,56 +1,93 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Category } from '@/types';
 
 const inputClassName =
-  'mt-1 w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none focus:border-gray-500';
+  'mt-1 w-full rounded-xl border border-ld-border bg-ld-surface-high px-4 py-3 text-[15px] text-ld-text outline-none focus:border-ld-border-bright';
+
+const chipSelected =
+  'border-ld-orange bg-ld-orange/15 text-ld-text';
+const chipIdle =
+  'border-ld-border bg-ld-surface-high text-ld-text-sub hover:border-ld-border-bright';
 
 const LEVELS = ['beginner', 'intermediate', 'advanced'] as const;
 
 type StrengthLevel = (typeof LEVELS)[number];
 
+type StrengthSnapshot = {
+  level: StrengthLevel;
+  equipment: string;
+  goals: string;
+  goalEventName: string;
+  goalEventDate: string;
+  goalEventNotes: string;
+  injuryNotes: string;
+};
+
 type StrengthCoachFormProps = {
   category: Category;
 };
 
-export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
-  const router = useRouter();
+function buildInitial(category: Category): StrengthSnapshot {
   const ctx = category.coach_context ?? {};
-
-  const initialLevel: StrengthLevel =
+  const level: StrengthLevel =
     typeof ctx.level === 'string' &&
     (LEVELS as readonly string[]).includes(ctx.level)
       ? (ctx.level as StrengthLevel)
       : 'intermediate';
-  const [level, setLevel] = useState(initialLevel);
-  const [equipment, setEquipment] = useState(
-    typeof ctx.equipment === 'string' ? ctx.equipment : ''
-  );
-  const [goals, setGoals] = useState(
-    typeof ctx.goals === 'string' ? ctx.goals : ''
-  );
-  const [goalEventName, setGoalEventName] = useState(
-    category.goal_event_name ?? ''
-  );
-  const [goalEventDate, setGoalEventDate] = useState(
-    category.goal_event_date ?? ''
-  );
-  const [goalEventNotes, setGoalEventNotes] = useState(
-    category.goal_event_notes ?? ''
-  );
-  const [injuryNotes, setInjuryNotes] = useState(
-    typeof ctx.injury_notes === 'string' ? ctx.injury_notes : ''
-  );
+  return {
+    level,
+    equipment: typeof ctx.equipment === 'string' ? ctx.equipment : '',
+    goals: typeof ctx.goals === 'string' ? ctx.goals : '',
+    goalEventName: category.goal_event_name ?? '',
+    goalEventDate: category.goal_event_date ?? '',
+    goalEventNotes: category.goal_event_notes ?? '',
+    injuryNotes:
+      typeof ctx.injury_notes === 'string' ? ctx.injury_notes : '',
+  };
+}
+
+export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
+  const router = useRouter();
+  const ctx = category.coach_context ?? {};
+  const [snapshot, setSnapshot] = useState(() => buildInitial(category));
+  const [level, setLevel] = useState(snapshot.level);
+  const [equipment, setEquipment] = useState(snapshot.equipment);
+  const [goals, setGoals] = useState(snapshot.goals);
+  const [goalEventName, setGoalEventName] = useState(snapshot.goalEventName);
+  const [goalEventDate, setGoalEventDate] = useState(snapshot.goalEventDate);
+  const [goalEventNotes, setGoalEventNotes] = useState(snapshot.goalEventNotes);
+  const [injuryNotes, setInjuryNotes] = useState(snapshot.injuryNotes);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+
+  const isDirty = useMemo(
+    () =>
+      level !== snapshot.level ||
+      equipment !== snapshot.equipment ||
+      goals !== snapshot.goals ||
+      goalEventName !== snapshot.goalEventName ||
+      goalEventDate !== snapshot.goalEventDate ||
+      goalEventNotes !== snapshot.goalEventNotes ||
+      injuryNotes !== snapshot.injuryNotes,
+    [
+      level,
+      equipment,
+      goals,
+      goalEventName,
+      goalEventDate,
+      goalEventNotes,
+      injuryNotes,
+      snapshot,
+    ]
+  );
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!isDirty) return;
     setError(null);
-    setSuccess(false);
     setLoading(true);
 
     try {
@@ -77,7 +114,15 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
         setError(data.error ?? 'Failed to save');
         return;
       }
-      setSuccess(true);
+      setSnapshot({
+        level,
+        equipment,
+        goals,
+        goalEventName,
+        goalEventDate,
+        goalEventNotes,
+        injuryNotes,
+      });
       router.refresh();
     } catch {
       setError('Something went wrong. Please try again.');
@@ -89,17 +134,15 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <fieldset>
-        <legend className="text-sm text-gray-300">Level</legend>
+        <legend className="text-xs font-semibold text-ld-text-sub">Level</legend>
         <div className="mt-2 flex flex-wrap gap-2">
           {LEVELS.map((l) => (
             <button
               key={l}
               type="button"
               onClick={() => setLevel(l)}
-              className={`rounded border px-3 py-1.5 text-sm capitalize ${
-                level === l
-                  ? 'border-white bg-gray-800 text-white'
-                  : 'border-gray-700 text-gray-400 hover:border-gray-500'
+              className={`rounded-[14px] border px-3 py-1.5 text-sm capitalize ${
+                level === l ? chipSelected : chipIdle
               }`}
             >
               {l}
@@ -108,8 +151,10 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
         </div>
       </fieldset>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">Available equipment</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Available equipment
+        </span>
         <textarea
           rows={2}
           value={equipment}
@@ -119,8 +164,8 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">Goals</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">Goals</span>
         <textarea
           rows={3}
           value={goals}
@@ -129,9 +174,10 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">
-          Goal event name <span className="text-gray-500">(optional)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Goal event name{' '}
+          <span className="font-normal text-ld-text-muted">(optional)</span>
         </span>
         <input
           type="text"
@@ -142,9 +188,10 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">
-          Goal event date <span className="text-gray-500">(optional)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Goal event date{' '}
+          <span className="font-normal text-ld-text-muted">(optional)</span>
         </span>
         <input
           type="date"
@@ -154,9 +201,10 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">
-          Goal event notes <span className="text-gray-500">(optional)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Goal event notes{' '}
+          <span className="font-normal text-ld-text-muted">(optional)</span>
         </span>
         <textarea
           rows={2}
@@ -166,8 +214,10 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
         />
       </label>
 
-      <label className="block text-sm">
-        <span className="text-gray-300">Injury / constraint notes</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-ld-text-sub">
+          Injury / constraint notes
+        </span>
         <textarea
           rows={3}
           value={injuryNotes}
@@ -177,20 +227,15 @@ export function StrengthCoachForm({ category }: StrengthCoachFormProps) {
       </label>
 
       {error && (
-        <p className="text-sm text-red-400" role="alert">
+        <p className="text-sm text-ld-red" role="alert">
           {error}
-        </p>
-      )}
-      {success && (
-        <p className="text-sm text-green-400" role="status">
-          Saved.
         </p>
       )}
 
       <button
         type="submit"
-        disabled={loading}
-        className="w-full rounded bg-white px-4 py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200 disabled:opacity-50"
+        disabled={!isDirty || loading}
+        className="w-full rounded-[14px] bg-ld-orange py-3.5 text-[15px] font-extrabold text-white disabled:opacity-60"
       >
         {loading ? 'Saving…' : 'Save'}
       </button>

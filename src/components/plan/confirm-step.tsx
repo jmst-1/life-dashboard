@@ -117,7 +117,7 @@ export function ConfirmStep({
         setError(data.error ?? 'Failed to activate week');
         return;
       }
-      router.push('/week/current');
+      router.push('/today');
       router.refresh();
     } catch {
       setError('Something went wrong. Please try again.');

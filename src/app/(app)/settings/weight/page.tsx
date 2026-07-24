@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { SetHeader } from '@/components/layout/header-context';
 import { WeightLogForm } from '@/components/settings/weight-log-form';
 import { getWeightLogs } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
@@ -17,21 +17,13 @@ export default async function WeightSettingsPage() {
   const logs = await getWeightLogs(supabase, user.id);
 
   return (
-    <div className="min-h-screen bg-gray-950 px-4 py-8 pb-24 text-white">
-      <div className="mx-auto max-w-md">
-        <Link
-          href="/settings"
-          className="text-sm text-gray-400 hover:text-white"
-        >
-          ← Settings
-        </Link>
-        <h1 className="mt-4 text-xl font-semibold">Weight Log</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Log weigh-ins. Your profile current weight updates automatically.
-        </p>
-        <div className="mt-8">
-          <WeightLogForm logs={logs} />
-        </div>
+    <div className="px-5 pb-8 pt-4 text-ld-text">
+      <SetHeader title="Weight Log" backHref="/settings" />
+      <p className="text-[13px] text-ld-text-sub">
+        Log weigh-ins. Your profile current weight updates automatically.
+      </p>
+      <div className="mt-6">
+        <WeightLogForm logs={logs} />
       </div>
     </div>
   );

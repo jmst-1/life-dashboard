@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CalendarDays, Clock, Settings } from 'lucide-react';
+import { CalendarDays, Clock, Settings, Sun } from 'lucide-react';
 
 const TABS = [
-  { href: '/week/current', label: 'Today', icon: CalendarDays },
-  { href: '/history', label: 'History', icon: Clock },
+  { href: '/today', label: 'Today', icon: Sun },
+  { href: '/ahead', label: 'Ahead', icon: CalendarDays },
+  { href: '/log', label: 'Log', icon: Clock },
   { href: '/settings', label: 'Settings', icon: Settings },
 ] as const;
 
@@ -14,8 +15,18 @@ function isActive(pathname: string, href: string): boolean {
   if (href === '/settings') {
     return pathname === '/settings' || pathname.startsWith('/settings/');
   }
-  if (href === '/week/current') {
-    return pathname === '/week/current' || pathname.startsWith('/week/');
+  if (href === '/today') {
+    return (
+      pathname === '/today' ||
+      pathname.startsWith('/week/') ||
+      pathname === '/'
+    );
+  }
+  if (href === '/ahead') {
+    return pathname === '/ahead' || pathname.startsWith('/plan');
+  }
+  if (href === '/log') {
+    return pathname === '/log' || pathname.startsWith('/history');
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -25,36 +36,43 @@ export function BottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-800 bg-gray-950/95 backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-ld-border bg-ld-surface/95 backdrop-blur"
       aria-label="Main"
     >
-      <ul className="mx-auto flex h-14 max-w-lg items-stretch">
+      <ul className="mx-auto flex max-w-phone items-stretch px-0 pb-[env(safe-area-inset-bottom)] pt-2">
         {TABS.map(({ href, label, icon: Icon }) => {
           const active = isActive(pathname, href);
           return (
             <li key={href} className="flex-1">
               <Link
                 href={href}
-                className={`flex h-full flex-col items-center justify-center gap-0.5 text-xs ${
-                  active
-                    ? 'text-white'
-                    : 'text-gray-500 hover:text-gray-300'
-                }`}
+                className="flex min-h-[44px] flex-col items-center justify-center gap-1 px-0 py-2"
               >
                 <Icon
-                  size={20}
+                  size={21}
                   strokeWidth={active ? 2.25 : 1.75}
+                  className={active ? 'text-ld-orange' : 'text-ld-text-muted'}
                   aria-hidden
                 />
-                <span className={active ? 'font-medium' : undefined}>
+                <span
+                  className={`text-[10px] tracking-wide ${
+                    active
+                      ? 'font-extrabold text-ld-orange'
+                      : 'font-normal text-ld-text-muted'
+                  }`}
+                >
                   {label}
                 </span>
+                {active ? (
+                  <span className="-mt-0.5 h-0.5 w-4 rounded-sm bg-ld-orange" />
+                ) : (
+                  <span className="-mt-0.5 h-0.5 w-4" />
+                )}
               </Link>
             </li>
           );
         })}
       </ul>
-      <div className="h-[env(safe-area-inset-bottom)]" />
     </nav>
   );
 }

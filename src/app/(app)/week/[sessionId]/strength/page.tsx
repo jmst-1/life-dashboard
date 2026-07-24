@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { SetHeader } from '@/components/layout/header-context';
 import { StrengthSessionForm } from '@/components/week/strength-session-form';
 import { getSessionById, getWeekById } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
@@ -29,16 +29,9 @@ export default async function StrengthSessionPage({
   const canEdit = week?.status === 'active';
 
   return (
-    <div className="min-h-screen bg-gray-950 px-4 py-8 pb-24 text-white">
-      <div className="mx-auto max-w-md space-y-4">
-        <Link
-          href="/week/current"
-          className="inline-flex text-sm text-gray-400 underline underline-offset-2 hover:text-white"
-        >
-          ← Back to week
-        </Link>
-        <StrengthSessionForm session={session} canEdit={!!canEdit} />
-      </div>
+    <div className="px-5 pb-8 pt-4 text-ld-text">
+      <SetHeader title={session.title} backHref="/today" backLabel="Back to Today" />
+      <StrengthSessionForm session={session} canEdit={!!canEdit} />
     </div>
   );
 }

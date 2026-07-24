@@ -433,7 +433,7 @@ export function OnboardingFlow({
 
             <button
               type="button"
-              onClick={() => router.push('/week/current')}
+              onClick={() => router.push('/today')}
               className="w-full rounded bg-white px-4 py-2.5 text-sm font-medium text-gray-950 hover:bg-gray-200"
             >
               Start my week

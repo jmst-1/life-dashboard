@@ -64,14 +64,32 @@ export function LoginForm() {
         password,
       });
 
-      setLoading(false);
-
       if (signInError) {
+        setLoading(false);
         setError(signInError.message);
         return;
       }
 
-      router.push('/onboarding');
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      let nextPath = '/onboarding';
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('current_weight_kg, height_cm, age')
+          .eq('id', user.id)
+          .maybeSingle();
+        const complete =
+          profile?.current_weight_kg != null &&
+          profile?.height_cm != null &&
+          profile?.age != null;
+        if (complete) nextPath = '/today';
+      }
+
+      setLoading(false);
+      router.push(nextPath);
       router.refresh();
       return;
     }

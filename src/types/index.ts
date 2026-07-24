@@ -1,14 +1,63 @@
-export type TrackingType = 'ai_plan' | 'random_pick' | 'session' | 'log_only' | 'count';
+export type TrackingType =
+  | 'ai_plan'
+  | 'random_pick'
+  | 'tracked'
+  | 'session'
+  | 'log_only'
+  | 'count';
+export type CategoryMode = 'ai' | 'seeded' | 'tracked';
+export type EffortType = 'rpe' | 'duration' | 'binary';
 export type SessionRenderer = 'cycling' | 'strength' | 'movement' | 'generic';
 export type DayType = 'hard' | 'moderate' | 'rest';
-export type TrainingPhase = 'base' | 'build' | 'peak' | 'taper' | 'race_week' | 'recovery';
+export type TrainingPhase =
+  | 'base'
+  | 'build'
+  | 'peak'
+  | 'taper'
+  | 'race_week'
+  | 'recovery';
 
-export type CyclingZone = { name: string; duration_min: number; pct_ftp_low: number; pct_ftp_high: number };
-export type StrengthExercise = { name: string; sets: number; reps: string; notes: string };
-export type StrengthBlock = { name: string; duration_min: number; exercises: StrengthExercise[] };
-export type RoutineStep = { order: number; name: string; duration_sec: number; cue: string };
-export type ExerciseLogSet = { set_num: number; reps: number | null; weight_kg: number | null; equipment: string | null; notes: string | null };
-export type ExerciseLogEntry = { exercise_name: string; notes: string | null; sets: ExerciseLogSet[] };
+export type CyclingZone = {
+  name: string;
+  duration_min: number;
+  pct_ftp_low: number;
+  pct_ftp_high: number;
+};
+export type StrengthExercise = {
+  name: string;
+  sets: number;
+  reps: string;
+  notes: string;
+};
+export type StrengthBlock = {
+  name: string;
+  duration_min: number;
+  exercises: StrengthExercise[];
+};
+export type RoutineStep = {
+  order: number;
+  name: string;
+  duration_sec: number;
+  cue: string;
+};
+export type ExerciseLogSet = {
+  set_num: number;
+  reps: number | null;
+  weight_kg: number | null;
+  equipment: string | null;
+  notes: string | null;
+};
+export type ExerciseLogEntry = {
+  exercise_name: string;
+  notes: string | null;
+  sets: ExerciseLogSet[];
+};
+
+export type TaskTemplateItem = {
+  id: string;
+  label: string;
+  duration: string;
+};
 
 export type Profile = {
   id: string;
@@ -54,13 +103,59 @@ export type StrengthCoachContext = {
   injury_notes?: string;
 };
 
+/** Running coach_context keys: threshold_pace, phase, goals, equipment_notes, injury_notes */
+export type RunningCoachContext = {
+  threshold_pace?: string;
+  phase?: TrainingPhase;
+  goals?: string;
+  equipment_notes?: string;
+  injury_notes?: string;
+};
+
+export type SwimPoolLength = '25m' | '50m' | '25yd';
+
+/** Swimming coach_context keys: css_per_100, pool_length, phase, goals, equipment_notes, injury_notes */
+export type SwimmingCoachContext = {
+  css_per_100?: string;
+  pool_length?: SwimPoolLength;
+  phase?: TrainingPhase;
+  goals?: string;
+  equipment_notes?: string;
+  injury_notes?: string;
+};
+
+export type TriathlonRaceDistance =
+  | 'sprint'
+  | 'olympic'
+  | '70.3'
+  | 'ironman'
+  | 'other';
+
+/** Triathlon coach_context keys: race_distance, swim_css_per_100, bike_ftp, run_threshold_pace, … */
+export type TriathlonCoachContext = {
+  race_distance?: TriathlonRaceDistance;
+  swim_css_per_100?: string;
+  bike_ftp?: number;
+  run_threshold_pace?: string;
+  phase?: TrainingPhase;
+  goals?: string;
+  equipment_notes?: string;
+  injury_notes?: string;
+};
+
 export type Category = {
   id: string;
   user_id: string;
   name: string;
   icon: string;
   color: string;
+  color_dim?: string | null;
   tracking_type: TrackingType;
+  mode?: CategoryMode | null;
+  effort_type?: EffortType;
+  sessions_per_week?: number;
+  timed_session?: boolean;
+  task_template?: TaskTemplateItem[];
   ai_enabled: boolean;
   status: 'active' | 'archived';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSONB coach context is open-ended
@@ -88,6 +183,7 @@ export type Week = {
   time_summary: Record<string, any> | null;
   weight_kg_snapshot: number | null;
   coach_commentary: string | null;
+  is_deload?: boolean;
   created_at: string;
 };
 
@@ -115,6 +211,9 @@ export type Session = {
   execution_notes: string | null;
   completed_at: string | null;
   library_entry_id: string | null;
+  rpe?: number | null;
+  tasks_done?: string[];
+  timed_duration_sec?: number | null;
   created_at: string;
 };
 
@@ -123,7 +222,13 @@ export type MovementLibraryEntry = {
   user_id: string | null;
   library_type: 'mobility' | 'stretch';
   name: string;
-  target_area: 'hips' | 'spine' | 'shoulders' | 'ankles' | 'hamstrings' | 'full_body';
+  target_area:
+    | 'hips'
+    | 'spine'
+    | 'shoulders'
+    | 'ankles'
+    | 'hamstrings'
+    | 'full_body';
   duration_min: number;
   equipment: 'none' | 'band' | 'foam_roller' | 'yoga_mat';
   steps: RoutineStep[];
@@ -159,10 +264,31 @@ export type NutritionPlan = {
   race_week: boolean;
   training_calories_map: Record<string, number>;
   macro_guide: {
-    day_types: Record<DayType, { calories: number; protein_g: number; carbs_g: number; fat_g: number; notes: string }>;
+    day_types: Record<
+      DayType,
+      {
+        calories: number;
+        protein_g: number;
+        carbs_g: number;
+        fat_g: number;
+        notes: string;
+      }
+    >;
     day_map: Record<string, DayType>;
   };
   meal_prep_brief: string;
+  meal_prep_summary: string | null;
   generated_at: string;
   created_at: string;
+};
+
+export type GoalEvent = {
+  id: string;
+  user_id: string;
+  label: string;
+  event_date: string;
+  event_type: 'cycling' | 'duathlon' | 'triathlon' | 'run' | 'other';
+  distances: string[];
+  created_at: string;
+  updated_at: string;
 };

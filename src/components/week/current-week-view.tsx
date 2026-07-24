@@ -112,9 +112,7 @@ export function CurrentWeekView({
       setDrawer({ type: 'movement', session });
       return;
     }
-    if (canEdit) {
-      setDrawer({ type: 'log', session });
-    }
+    setDrawer({ type: 'log', session });
   }
 
   async function shuffleSession(session: Session) {
@@ -240,6 +238,7 @@ export function CurrentWeekView({
       {drawer?.type === 'log' && (
         <LogSessionModal
           session={drawer.session}
+          canEdit={canEdit}
           onClose={() => setDrawer(null)}
           onSaved={(updated) => {
             upsertSession(updated);

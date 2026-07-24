@@ -35,5 +35,5 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/onboarding`);
   }
 
-  return NextResponse.redirect(`${origin}/week/current`);
+  return NextResponse.redirect(`${origin}/today`);
 }

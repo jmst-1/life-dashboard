@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { SetHeader } from '@/components/layout/header-context';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { getProfile } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
@@ -20,21 +20,13 @@ export default async function ProfileSettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 px-4 py-8 pb-24 text-white">
-      <div className="mx-auto max-w-md">
-        <Link
-          href="/settings"
-          className="text-sm text-gray-400 hover:text-white"
-        >
-          ← Settings
-        </Link>
-        <h1 className="mt-4 text-xl font-semibold">Profile</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Body metrics, deficit preferences, and dietary notes.
-        </p>
-        <div className="mt-8">
-          <ProfileForm profile={profile} />
-        </div>
+    <div className="px-5 pb-8 pt-4 text-ld-text">
+      <SetHeader title="Profile" backHref="/settings" />
+      <p className="text-[13px] text-ld-text-sub">
+        Body metrics and deficit preferences.
+      </p>
+      <div className="mt-6">
+        <ProfileForm profile={profile} />
       </div>
     </div>
   );
